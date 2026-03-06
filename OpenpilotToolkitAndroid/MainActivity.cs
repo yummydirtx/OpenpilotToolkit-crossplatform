@@ -1,5 +1,6 @@
 ﻿using Android.Content;
 using Android.Content.PM;
+using Android.Net.Wifi;
 using Android.Runtime;
 using Android.Text;
 using Android.Views;
@@ -10,11 +11,14 @@ using Google.Android.Material.Navigation;
 using Google.Android.Material.ProgressIndicator;
 using Google.Android.Material.Snackbar;
 using Java.Interop;
-using OpenpilotSdk.Hardware;
 using OpenpilotSdk.Git;
+using OpenpilotSdk.Hardware;
 using OpenpilotSdk.OpenPilot.Fork;
+using Renci.SshNet.Common;
 using Serilog;
 using Serilog.Core;
+using System.Linq;
+using System.Net;
 using Xamarin.Essentials;
 using Environment = System.Environment;
 using Toolbar = AndroidX.AppCompat.Widget.Toolbar;
@@ -28,6 +32,8 @@ namespace OpenpilotToolkitAndroid
         private readonly Dictionary<string,OpenpilotDevice> _devices = new();
         private AutoCompleteTextView? _cmbOpenpilotDevice;
         private bool _settingsEnabled;
+
+
 
         public bool OnNavigationItemSelected(IMenuItem item)
         {
@@ -92,6 +98,21 @@ namespace OpenpilotToolkitAndroid
 
             SetContentView(Resource.Layout.activity_main);
 
+            var usernames = new[] { "spektor56",
+                "sunnypilot",
+                "commaai",
+                "FrogAi" };
+
+            var autoComplete = FindViewById<AutoCompleteTextView>(Resource.Id.tietForkUsername);
+
+            var adapter2 = new ArrayAdapter<string>(
+                this,
+                Resource.Layout.support_simple_spinner_dropdown_item, // Material-friendly dropdown
+                usernames);
+
+            autoComplete.Adapter = adapter2;
+
+
             _cmbOpenpilotDevice = FindViewById<AutoCompleteTextView>(Resource.Id.autocomplete_comma);
             var adapter = new ArrayAdapter(this, Resource.Layout.list_item);
             if (_cmbOpenpilotDevice != null)
@@ -148,6 +169,16 @@ namespace OpenpilotToolkitAndroid
 
         private async Task GetDevicesAsync()
         {
+            WifiManager.MulticastLock? multicastLock = null;
+            if (ApplicationContext != null)
+            {
+                var wifi = ApplicationContext.GetSystemService(Context.WifiService) as WifiManager;
+                if (wifi != null)
+                {
+                    multicastLock = wifi.CreateMulticastLock("Zeroconf lock");
+                }
+            }
+
             _devices.Clear();
             await MainThread.InvokeOnMainThreadAsync(() =>
             {
@@ -160,41 +191,88 @@ namespace OpenpilotToolkitAndroid
 
             try
             {
-                var foundDevices = 0;
-                await foreach (var device in OpenpilotDevice.DiscoverAsync())
+                var discoveredDevices = new HashSet<OpenpilotDevice>();
+
+                try
                 {
-                    foundDevices++;
-
-                    
-                    if (device.IsAuthenticated)
+                    if (multicastLock != null)
                     {
-                        var deviceDescription = device.ToString();
-                        if(!_devices.ContainsKey(deviceDescription))
+                        multicastLock.Acquire();
+                    }
+                    
+                    await Task.Run(async () =>
+                    {
+                        var connectionTasks = new List<Task>();
+                        try
                         {
-                            _devices.Add(deviceDescription, device);
-
-                            await MainThread.InvokeOnMainThreadAsync(() =>
+                            await foreach (var device in OpenpilotDevice.DiscoverAsync().ConfigureAwait(false))
                             {
-                                ((ArrayAdapter)_cmbOpenpilotDevice.Adapter).Add(deviceDescription);
-                                _cmbOpenpilotDevice.SetText(
-                                    ((ArrayAdapter)_cmbOpenpilotDevice.Adapter).GetItem(0).ToString(), false);
+                                if (discoveredDevices.Add(device))
+                                {
+                                    connectionTasks.Add(Task.Run(async () =>
+                                    {
+                                        if (device is not UnknownDevice)
+                                        {
+                                            if (!device.IsAuthenticated)
+                                            {
+                                                try
+                                                {
+                                                    await device.ConnectSftpAsync().ConfigureAwait(false);
+                                                }
+                                                catch (SshAuthenticationException ex)
+                                                {
+                                                    Log.Information(ex, "Authentication failed for {Device}", device);
+                                                }
+                                            }
+                                        }
 
-                            });
+                                        if (device.IsAuthenticated)
+                                        {
+                                            var deviceDescription = device.ToString();
+                                            if (!_devices.ContainsKey(deviceDescription))
+                                            {
+                                                _devices.Add(deviceDescription, device);
+
+                                                await MainThread.InvokeOnMainThreadAsync(() =>
+                                                {
+                                                    ((ArrayAdapter)_cmbOpenpilotDevice.Adapter).Add(deviceDescription);
+                                                    _cmbOpenpilotDevice.SetText(
+                                                        ((ArrayAdapter)_cmbOpenpilotDevice.Adapter).GetItem(0).ToString(), false);
+
+                                                });
+                                            }
+                                        }
+                                    }));
+                                }
+                            }
                         }
+                        catch (TaskCanceledException)
+                        {
+                            Log.Error("Discovery Timed Out.");
+                        }
+
+                        await Task.WhenAll(connectionTasks).ConfigureAwait(false);
+                    });
+                }
+                finally
+                {
+                    if (multicastLock != null)
+                    {
+                        multicastLock.Release();
                     }
                 }
-                
-                if (foundDevices < 1)
+
+                if (discoveredDevices.Count < 1)
                 {
                     await ShowToastOnMainThreadAsync(
                         "No devices were found, please check that SSH is enabled on your device and the device is connected to the network.");
                 }
-                else if (_devices.Count < 1 && foundDevices > 0)
+                else if (_devices.Count < 1 && discoveredDevices.Count > 0)
                 {
                     await MainThread.InvokeOnMainThreadAsync(() =>
                     {
                         Android.Views.View view = FindViewById(Android.Resource.Id.Content);
-                        var snack = Snackbar.Make(view, $"{foundDevices} device(s) found but authentication failed, click to start the SSH wizard.", BaseTransientBottomBar.LengthIndefinite);
+                        var snack = Snackbar.Make(view, $"{discoveredDevices.Count} device(s) found but authentication failed, click to start the SSH wizard.", BaseTransientBottomBar.LengthIndefinite);
                         snack.SetAction("SSH Wizard", (view) =>
                         {
                             var sshActivity = new Intent(this, typeof(SshActivity));
