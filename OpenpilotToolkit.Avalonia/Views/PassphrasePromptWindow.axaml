@@ -1,0 +1,28 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="OpenpilotToolkit.Avalonia.Views.PassphrasePromptWindow"
+        Width="460"
+        Height="240"
+        CanResize="False"
+        SystemDecorations="BorderOnly"
+        Title="SSH Key Passphrase"
+        WindowStartupLocation="CenterOwner">
+  <Border Padding="22">
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+      <TextBlock FontSize="20" FontWeight="SemiBold" Text="SSH Key Passphrase Required" />
+      <TextBlock Grid.Row="1"
+                 Margin="0,12,0,0"
+                 Text="{Binding PromptMessage}"
+                 TextWrapping="Wrap" />
+      <TextBox Grid.Row="2"
+               x:Name="PassphraseTextBox"
+               Margin="0,18,0,0"
+               PasswordChar="*"
+               Watermark="Enter the SSH key passphrase" />
+      <Grid Grid.Row="3" Margin="0,20,0,0" ColumnDefinitions="*,Auto,Auto">
+        <Button Grid.Column="1" MinWidth="96" Content="Cancel" Click="CancelButton_OnClick" />
+        <Button Grid.Column="2" MinWidth="96" Margin="10,0,0,0" Classes="accent" Content="Retry" Click="RetryButton_OnClick" />
+      </Grid>
+    </Grid>
+  </Border>
+</Window>

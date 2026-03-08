@@ -5,13 +5,16 @@ namespace OpenpilotSdk.Runtime
     public static class OpenpilotHost
     {
         private static string? _sshKeyOverridePath;
+        private static string? _sshKeyPassphraseOverride;
 
-        public static void Configure(string? sshKeyPath = null)
+        public static void Configure(string? sshKeyPath = null, string? sshKeyPassphrase = null)
         {
             if (!string.IsNullOrWhiteSpace(sshKeyPath))
             {
                 _sshKeyOverridePath = Path.GetFullPath(sshKeyPath);
             }
+
+            _sshKeyPassphraseOverride = NormalizePassphrase(sshKeyPassphrase);
 
             _ = OpenpilotPaths.ApplicationDataDirectory;
             _ = OpenpilotPaths.TempDirectory;
@@ -24,6 +27,11 @@ namespace OpenpilotSdk.Runtime
             _sshKeyOverridePath = string.IsNullOrWhiteSpace(sshKeyPath)
                 ? null
                 : Path.GetFullPath(sshKeyPath);
+        }
+
+        public static void SetSshKeyPassphrase(string? sshKeyPassphrase)
+        {
+            _sshKeyPassphraseOverride = NormalizePassphrase(sshKeyPassphrase);
         }
 
         public static string ResolvePrivateSshKeyPath()
@@ -46,6 +54,12 @@ namespace OpenpilotSdk.Runtime
 
             throw new FileNotFoundException(
                 "No usable private SSH key was found. Set OPENPILOT_SSH_KEY or pass --ssh-key to point at an existing private key.");
+        }
+
+        public static string? ResolvePrivateSshKeyPassphrase()
+        {
+            return NormalizePassphrase(_sshKeyPassphraseOverride)
+                   ?? NormalizePassphrase(Environment.GetEnvironmentVariable("OPENPILOT_SSH_KEY_PASSPHRASE"));
         }
 
         private static void ConfigureBundledFfmpeg()
@@ -88,6 +102,11 @@ namespace OpenpilotSdk.Runtime
             }
 
             return null;
+        }
+
+        private static string? NormalizePassphrase(string? value)
+        {
+            return string.IsNullOrEmpty(value) ? null : value;
         }
     }
 }

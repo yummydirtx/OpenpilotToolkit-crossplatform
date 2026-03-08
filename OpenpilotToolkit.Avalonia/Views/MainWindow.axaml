@@ -1,0 +1,746 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:viewModels="clr-namespace:OpenpilotToolkit.Avalonia.ViewModels"
+        x:Class="OpenpilotToolkit.Avalonia.Views.MainWindow"
+        Width="1320"
+        Height="840"
+        MinWidth="1180"
+        MinHeight="720"
+        Title="OPENPILOT TOOLKIT"
+        mc:Ignorable="d">
+  <Design.DataContext>
+    <viewModels:MainWindowViewModel />
+  </Design.DataContext>
+
+  <Grid RowDefinitions="64,*">
+    <Border Classes="topbar">
+      <Grid Margin="18,10,18,10" ColumnDefinitions="Auto,*,Auto,280,Auto,Auto,Auto,220">
+        <StackPanel Orientation="Horizontal" Spacing="14">
+          <Border Classes="nav-abbrev">
+            <TextBlock Classes="nav-abbrev-text" Text="OP" />
+          </Border>
+          <StackPanel Spacing="0" VerticalAlignment="Center">
+            <TextBlock Classes="window-title" Text="OPENPILOT TOOLKIT" />
+            <TextBlock Classes="window-subtitle" Text="Linux preview shell" />
+          </StackPanel>
+        </StackPanel>
+
+        <TextBlock Grid.Column="2"
+                   Margin="0,0,12,0"
+                   Classes="toolbar-label"
+                   Text="ACTIVE DEVICE:" />
+
+        <ComboBox Grid.Column="3"
+                  Width="280"
+                  ItemsSource="{Binding Devices}"
+                  SelectedItem="{Binding SelectedDevice}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding DisplayName}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+
+        <Button Grid.Column="4"
+                Margin="12,0,0,0"
+                Classes="toolbar-action accent"
+                Content="Scan For OP Devices"
+                Command="{Binding DiscoverDevicesCommand}" />
+
+        <Border Grid.Column="5"
+                Margin="12,0,0,0"
+                Classes="status-chip"
+                Background="{Binding WifiStatusBackground}">
+          <TextBlock Classes="status-text" Text="{Binding WifiStatusText}" />
+        </Border>
+
+        <Border Grid.Column="6"
+                Margin="12,0,0,0"
+                Classes="status-chip"
+                Background="{Binding SshStatusBackground}">
+          <TextBlock Classes="status-text" Text="{Binding SshStatusText}" />
+        </Border>
+
+        <Border Grid.Column="7"
+                Margin="12,0,0,0"
+                Classes="status-chip"
+                Background="#2A3140">
+          <TextBlock Classes="status-text" Text="{Binding StatusMessage}" />
+        </Border>
+      </Grid>
+    </Border>
+
+    <Border Grid.Row="1" Margin="16" Classes="shell-frame">
+      <Grid ColumnDefinitions="Auto,*">
+        <Border Width="{Binding NavigationPaneWidth}" Classes="navigation-pane">
+          <Grid RowDefinitions="Auto,*">
+            <Grid Margin="0,0,0,14" ColumnDefinitions="Auto,*">
+              <Button Classes="nav-toggle"
+                      Content="{Binding NavigationToggleLabel}"
+                      Command="{Binding ToggleNavigationCommand}" />
+              <StackPanel Grid.Column="1"
+                          Margin="12,0,0,0"
+                          IsVisible="{Binding IsNavigationExpanded}"
+                          Spacing="0"
+                          VerticalAlignment="Center">
+                <TextBlock Classes="section-title" Text="Functions" />
+                <TextBlock Classes="caption" Text="Toolkit drawer" />
+              </StackPanel>
+            </Grid>
+
+            <ListBox x:Name="DrawerList"
+                     Grid.Row="1"
+                     Classes="nav-list"
+                     SelectedIndex="{Binding SelectedPageIndex}">
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Export">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="EX" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Export" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Routes and camera tools" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Remote">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="RM" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Remote" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Power and service actions" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Settings">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="ST" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Settings" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Host preferences" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Log">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="LG" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Log" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Activity and diagnostics" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Explorer">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="FS" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Explorer" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Files and folders" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Fingerprint">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="FP" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Fingerprint" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Vehicle interface data" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="SSH Wizard">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="SSH" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="SSH Wizard" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Keys and device access" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Fork Installer">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="FK" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Fork Installer" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Repository deployment" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Flash Wizard">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="FW" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Flash Wizard" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Recovery and flashing" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Terminal">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="TM" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Terminal" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Interactive shell" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+
+              <ListBoxItem Classes="nav-item" ToolTip.Tip="Donate">
+                <Border Classes="nav-item-shell">
+                  <Grid ColumnDefinitions="40,*">
+                    <Border Classes="nav-abbrev">
+                      <TextBlock Classes="nav-abbrev-text" Text="DN" />
+                    </Border>
+                    <StackPanel Grid.Column="1"
+                                Margin="12,0,0,0"
+                                IsVisible="{Binding DataContext.IsNavigationExpanded, ElementName=DrawerList}"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                      <TextBlock Classes="nav-item-title" Text="Donate" />
+                      <TextBlock Classes="nav-item-subtitle" Text="Project support" />
+                    </StackPanel>
+                  </Grid>
+                </Border>
+              </ListBoxItem>
+            </ListBox>
+          </Grid>
+        </Border>
+
+        <Carousel Grid.Column="1"
+                  Margin="16,0,0,0"
+                  SelectedIndex="{Binding SelectedPageIndex}">
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="18" RowDefinitions="Auto,*">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox Text="{Binding ExportFolder}" Watermark="Export Folder" />
+                <Button Grid.Column="1"
+                        Margin="12,0,0,0"
+                        Content="Browse"
+                        Click="BrowseExportFolderButton_OnClick" />
+              </Grid>
+
+              <Grid Grid.Row="1" Margin="0,18,0,0" ColumnDefinitions="200,240,*">
+                <Border Classes="surface-panel">
+                  <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title" Text="Tasks" />
+                    <Button Classes="accent" Content="Refresh Route List" Command="{Binding LoadRoutesCommand}" />
+                    <Button Content="Connect SSH" Command="{Binding ConnectSelectedDeviceCommand}" />
+                    <Button Content="Export Selected Route(s)" IsEnabled="False" />
+                    <Button Content="GPX Export" IsEnabled="False" />
+                    <Button Content="Mapillary Export" IsEnabled="False" />
+                    <Button Content="Delete Routes" IsEnabled="False" />
+                    <TextBlock Classes="caption"
+                               Margin="0,8,0,0"
+                               Text="Native playback and file export are still being ported to the Linux host."
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+
+                <Border Grid.Column="1" Margin="16,0,0,0" Classes="surface-panel">
+                  <Grid RowDefinitions="Auto,*">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="section-title" Text="Routes" />
+                      <Border HorizontalAlignment="Right" Classes="inline-chip">
+                        <TextBlock HorizontalAlignment="Center" Text="{Binding Routes.Count}" />
+                      </Border>
+                    </Grid>
+
+                    <ListBox Grid.Row="1"
+                             Margin="0,14,0,0"
+                             ItemsSource="{Binding Routes}"
+                             SelectedItem="{Binding SelectedRoute}">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <Border Classes="route-card">
+                            <StackPanel Spacing="4">
+                              <TextBlock Classes="card-title" Text="{Binding Identifier}" />
+                              <TextBlock Classes="caption" Text="{Binding DateLine}" />
+                              <TextBlock Classes="caption" Text="{Binding SegmentLine}" />
+                            </StackPanel>
+                          </Border>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </Grid>
+                </Border>
+
+                <Grid Grid.Column="2" Margin="16,0,0,0" RowDefinitions="Auto,*">
+                  <Grid ColumnDefinitions="*,280">
+                    <Border Classes="surface-panel">
+                      <StackPanel Spacing="12">
+                        <TextBlock Classes="section-title" Text="Export Camera" />
+                        <StackPanel Orientation="Horizontal" Spacing="18">
+                          <CheckBox Content="Front" IsChecked="True" />
+                          <CheckBox Content="Wide" />
+                          <CheckBox Content="Driver" />
+                        </StackPanel>
+                        <TextBlock Classes="caption"
+                                   Text="Camera selection is shown here to preserve the original export layout."
+                                   TextWrapping="Wrap" />
+                      </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Margin="16,0,0,0" Classes="surface-panel">
+                      <StackPanel Spacing="12">
+                        <TextBlock Classes="section-title" Text="Route Info" />
+                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                          <TextBlock Classes="form-label" Text="Route" />
+                          <TextBlock Grid.Column="1" Text="{Binding SelectedRouteTitle}" />
+
+                          <TextBlock Grid.Row="1" Classes="form-label" Text="Date" />
+                          <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedRouteDateLine}" />
+
+                          <TextBlock Grid.Row="2" Classes="form-label" Text="Segments" />
+                          <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedRouteSegmentLine}" />
+
+                          <TextBlock Grid.Row="3" Classes="form-label" Text="Device" />
+                          <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding ActiveDeviceDisplay}" />
+                        </Grid>
+                      </StackPanel>
+                    </Border>
+                  </Grid>
+
+                  <Border Grid.Row="1" Margin="0,16,0,0" Classes="placeholder-panel">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                      <TextBlock Classes="panel-title" Text="{Binding SelectedRouteTitle}" TextAlignment="Center" />
+                      <TextBlock Classes="caption"
+                                 MaxWidth="520"
+                                 Text="{Binding SelectedRouteSummary}"
+                                 TextAlignment="Center"
+                                 TextWrapping="Wrap" />
+                      <TextBlock Classes="placeholder-note"
+                                 MaxWidth="560"
+                                 Text="The Windows host shows a Flyleaf video player here. This Linux host keeps the export workflow layout, but media playback still needs a cross-platform replacement." />
+                    </StackPanel>
+                  </Border>
+                </Grid>
+              </Grid>
+            </Grid>
+          </ScrollViewer>
+
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="18" ColumnDefinitions="320,*">
+              <Border Classes="surface-panel">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="section-title" Text="Selected Device" />
+                  <TextBlock Classes="panel-title" Text="{Binding SelectedDeviceTitle}" />
+                  <TextBlock Classes="caption" Text="{Binding SelectedDeviceHostLine}" TextWrapping="Wrap" />
+                  <TextBlock Classes="caption" Text="{Binding SelectedDeviceStatusLine}" TextWrapping="Wrap" />
+                  <TextBlock Classes="caption"
+                             Margin="0,10,0,0"
+                             Text="The original Remote tab also exposes device-specific actions such as settings control and panda recovery." />
+                </StackPanel>
+              </Border>
+
+              <Grid Grid.Column="1" Margin="16,0,0,0" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto">
+                <Button Classes="accent large-action"
+                        Content="Connect SSH"
+                        Command="{Binding ConnectSelectedDeviceCommand}" />
+                <Button Grid.Column="1"
+                        Margin="16,0,0,0"
+                        Classes="large-action"
+                        Content="Reboot"
+                        Command="{Binding RebootCommand}" />
+
+                <Button Grid.Row="1"
+                        Margin="0,16,0,0"
+                        Classes="large-action"
+                        Content="Shut Down"
+                        Command="{Binding ShutdownCommand}" />
+                <Button Grid.Row="1"
+                        Grid.Column="1"
+                        Margin="16,16,0,0"
+                        Classes="large-action"
+                        Content="Update Openpilot"
+                        IsEnabled="False" />
+
+                <Grid Grid.Row="2" Grid.ColumnSpan="2" Margin="0,16,0,0" ColumnDefinitions="*,*,*">
+                  <Button Content="Open Settings" IsEnabled="False" />
+                  <Button Grid.Column="1" Margin="16,0,0,0" Content="Close Settings" IsEnabled="False" />
+                  <Button Grid.Column="2" Margin="16,0,0,0" Content="Flash Panda" IsEnabled="False" />
+                </Grid>
+              </Grid>
+            </Grid>
+          </ScrollViewer>
+
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="18" ColumnDefinitions="*,*">
+              <Border Classes="surface-panel">
+                <StackPanel Spacing="12">
+                  <TextBlock Classes="section-title" Text="Route Browser" />
+                  <TextBlock Classes="caption"
+                             Text="These controls mirror the original settings tab. Some toggles are displayed here before the related Linux features are fully ported." />
+
+                  <Grid Margin="0,6,0,0" ColumnDefinitions="Auto,140">
+                    <TextBlock VerticalAlignment="Center" Classes="form-label" Text="Recent route limit" />
+                    <ComboBox Grid.Column="1"
+                              Width="140"
+                              ItemsSource="{Binding RouteLimitOptions}"
+                              SelectedItem="{Binding SelectedRouteLimit}" />
+                  </Grid>
+
+                  <CheckBox Content="Combine segments on export" IsEnabled="False" />
+                  <CheckBox Content="Seek to keyframes during playback" IsEnabled="False" />
+                </StackPanel>
+              </Border>
+
+              <Border Grid.Column="1" Margin="16,0,0,0" Classes="surface-panel">
+                <StackPanel Spacing="12">
+                  <TextBlock Classes="section-title" Text="Migration Status" />
+                  <TextBlock Classes="caption" Text="Available now:" />
+                  <TextBlock Text="Discovery and device selection" />
+                  <TextBlock Text="SSH connect with encrypted-key passphrases" />
+                  <TextBlock Text="Recent route inventory" />
+                  <TextBlock Text="Fork installation" />
+                  <TextBlock Text="Reboot and shutdown" />
+                  <TextBlock Margin="0,10,0,0" Classes="caption" Text="Still in progress:" />
+                  <TextBlock Text="Video playback and route export" />
+                  <TextBlock Text="SSH file explorer" />
+                  <TextBlock Text="Terminal" />
+                  <TextBlock Text="Full SSH wizard parity" />
+                </StackPanel>
+              </Border>
+            </Grid>
+          </ScrollViewer>
+
+          <Grid Margin="18" RowDefinitions="Auto,*">
+            <Grid ColumnDefinitions="*,Auto">
+              <TextBlock Classes="section-title" Text="Toolkit Log" />
+              <Button Content="Clear" Command="{Binding ClearLogCommand}" />
+            </Grid>
+
+            <TextBox Grid.Row="1"
+                     Margin="0,14,0,0"
+                     Classes="log-console"
+                     AcceptsReturn="True"
+                     IsReadOnly="True"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     Text="{Binding ActivityLog}" />
+          </Grid>
+
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="18" ColumnDefinitions="220,*">
+              <Border Classes="surface-panel">
+                <StackPanel Spacing="10">
+                  <TextBlock Classes="section-title" Text="Quick Paths" />
+                  <Button Content="/data/openpilot" IsEnabled="False" />
+                  <Button Content="/persist" IsEnabled="False" />
+                  <Button Content="Media and logs" IsEnabled="False" />
+                  <Button Content="Parameters" IsEnabled="False" />
+                  <TextBlock Classes="caption"
+                             Margin="0,8,0,0"
+                             Text="The Linux file explorer will land here once SFTP navigation and editing are ported." />
+                </StackPanel>
+              </Border>
+
+              <Grid Grid.Column="1" Margin="16,0,0,0" RowDefinitions="Auto,Auto,*">
+                <TextBox IsReadOnly="True" Text="/data/media/0/realdata/" Watermark="Working directory" />
+                <TextBox Grid.Row="1" Margin="0,12,0,0" IsReadOnly="True" Watermark="Search" />
+                <Border Grid.Row="2" Margin="0,16,0,0" Classes="placeholder-panel">
+                  <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                    <TextBlock Classes="panel-title" Text="Explorer Port In Progress" TextAlignment="Center" />
+                    <TextBlock Classes="caption"
+                               MaxWidth="560"
+                               Text="The original Explorer tab combines quick folder shortcuts, a search box, and a file grid. This space is reserved for the Avalonia version of that workflow."
+                               TextAlignment="Center"
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </Grid>
+            </Grid>
+          </ScrollViewer>
+
+          <Grid Margin="18" ColumnDefinitions="340,*">
+            <Border Classes="surface-panel">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section-title" Text="Selected Device" />
+                <TextBlock Classes="panel-title" Text="{Binding SelectedDeviceTitle}" />
+                <TextBlock Classes="caption" Text="{Binding SelectedDeviceHostLine}" TextWrapping="Wrap" />
+                <TextBlock Classes="caption" Text="{Binding SelectedDeviceStatusLine}" TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <Border Grid.Column="1" Margin="16,0,0,0" Classes="placeholder-panel">
+              <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                <TextBlock Classes="panel-title" Text="Fingerprint View Pending" TextAlignment="Center" />
+                <TextBlock Classes="caption"
+                           MaxWidth="560"
+                           Text="The original toolkit shows the raw vehicle fingerprint on this page. The Linux host keeps the same location in the shell, but the fingerprint query workflow still needs to be ported."
+                           TextAlignment="Center"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="18" ColumnDefinitions="420,*">
+              <StackPanel Spacing="16">
+                <Border Classes="surface-panel">
+                  <StackPanel Spacing="12">
+                    <TextBlock Classes="section-title" Text="Host Access" />
+                    <TextBlock Classes="caption"
+                               Text="Point the toolkit at an existing private key. Encrypted keys are supported through the passphrase field or the retry prompt."
+                               TextWrapping="Wrap" />
+                    <TextBox Text="{Binding SshKeyPath}" Watermark="Auto-detect from ~/.ssh or OPENPILOT_SSH_KEY" />
+                    <Grid ColumnDefinitions="*,*">
+                      <Button Content="Browse" Click="BrowseSshKeyButton_OnClick" />
+                      <Button Grid.Column="1"
+                              Margin="12,0,0,0"
+                              Content="Use Default Search"
+                              Command="{Binding ResetSshKeyCommand}" />
+                    </Grid>
+                    <TextBox Text="{Binding SshKeyPassphrase}"
+                             PasswordChar="*"
+                             Watermark="Optional key passphrase or OPENPILOT_SSH_KEY_PASSPHRASE" />
+                    <TextBlock Classes="caption" Text="{Binding ResolvedSshKeySummary}" TextWrapping="Wrap" />
+                    <TextBlock Classes="caption" Text="{Binding SshKeyPassphraseSummary}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+
+                <Border Classes="surface-panel">
+                  <StackPanel Spacing="12">
+                    <TextBlock Classes="section-title" Text="Connection" />
+                    <TextBox Text="{Binding ManualHost}" Watermark="Hostname or IP address" />
+                    <Grid ColumnDefinitions="*,*">
+                      <Button Classes="accent" Content="Connect Host" Command="{Binding ConnectHostCommand}" />
+                      <Button Grid.Column="1"
+                              Margin="12,0,0,0"
+                              Content="Discover Network"
+                              Command="{Binding DiscoverDevicesCommand}" />
+                    </Grid>
+                    <TextBlock Classes="caption"
+                               Text="Use Connect Host for a known device address, or scan and then authenticate the selected device from the Remote or Export pages."
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </StackPanel>
+
+              <Grid Grid.Column="1" Margin="16,0,0,0" RowDefinitions="Auto,*">
+                <Border Classes="surface-panel">
+                  <StackPanel Spacing="8">
+                    <TextBlock Classes="section-title" Text="Discovered Devices" />
+                    <TextBlock Classes="caption" Text="{Binding DevicesSummary}" />
+                  </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Margin="0,16,0,0" Classes="surface-panel">
+                  <ListBox ItemsSource="{Binding Devices}" SelectedItem="{Binding SelectedDevice}">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Border Classes="route-card">
+                          <StackPanel Spacing="4">
+                            <TextBlock Classes="card-title" Text="{Binding DisplayName}" />
+                            <TextBlock Classes="caption" Text="{Binding HostLine}" />
+                            <TextBlock Classes="caption" Text="{Binding StatusLine}" />
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </Border>
+              </Grid>
+            </Grid>
+          </ScrollViewer>
+
+          <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+            <Grid Margin="18" ColumnDefinitions="420,*">
+              <Border Classes="surface-panel">
+                <StackPanel Spacing="12">
+                  <TextBlock Classes="section-title" Text="Install Fork" />
+                  <TextBox Text="{Binding ForkOwner}" Watermark="GitHub owner" />
+                  <TextBox Text="{Binding ForkBranch}" Watermark="Branch" />
+                  <TextBox Text="{Binding ForkRepository}" Watermark="Repository" />
+                  <Button Classes="accent" Content="Install Fork" Command="{Binding InstallForkCommand}" />
+                  <TextBlock Classes="caption"
+                             Text="This runs the same shallow clone + reboot workflow exposed by the Windows installer tab."
+                             TextWrapping="Wrap" />
+                </StackPanel>
+              </Border>
+
+              <Grid Grid.Column="1" Margin="16,0,0,0" RowDefinitions="Auto,*">
+                <Border Classes="surface-panel">
+                  <StackPanel Spacing="10">
+                    <TextBlock Classes="section-title" Text="Target Device" />
+                    <TextBlock Classes="panel-title" Text="{Binding SelectedDeviceTitle}" />
+                    <TextBlock Classes="caption" Text="{Binding SelectedDeviceSummary}" TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+
+                <Border Grid.Row="1" Margin="0,16,0,0" Classes="placeholder-panel">
+                  <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                    <TextBlock Classes="panel-title" Text="Fork Progress" TextAlignment="Center" />
+                    <TextBlock Classes="caption"
+                               MaxWidth="560"
+                               Text="Live progress updates appear in the top status bar and the Log tab while the install runs. The dedicated Windows progress dialog is not part of the Linux shell yet."
+                               TextAlignment="Center"
+                               TextWrapping="Wrap" />
+                  </StackPanel>
+                </Border>
+              </Grid>
+            </Grid>
+          </ScrollViewer>
+
+          <Grid Margin="18" ColumnDefinitions="320,*">
+            <Border Classes="surface-panel">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section-title" Text="Recovery Actions" />
+                <Button Content="Detect Fastboot Device" IsEnabled="False" />
+                <Button Content="Flash Recovery Image" IsEnabled="False" />
+                <Button Content="Restore Bootloader" IsEnabled="False" />
+                <TextBlock Classes="caption"
+                           Margin="0,8,0,0"
+                           Text="The Windows host wires this page into adb and fastboot helpers. The navigation entry is preserved here while the Linux flashing workflow is ported."
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+
+            <Border Grid.Column="1" Margin="16,0,0,0" Classes="placeholder-panel">
+              <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                <TextBlock Classes="panel-title" Text="Flash Wizard Pending" TextAlignment="Center" />
+                <TextBlock Classes="caption"
+                           MaxWidth="560"
+                           Text="This page will become the cross-platform replacement for the original recovery and flashing tools."
+                           TextAlignment="Center"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <Grid Margin="18" RowDefinitions="Auto,*">
+            <Border Classes="surface-panel">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section-title" Text="Terminal Port" />
+                <TextBlock Classes="caption"
+                           Text="The original Windows host embeds an xterm/CefSharp terminal here. The Linux shell keeps the page and layout reserved for a future cross-platform terminal implementation."
+                           TextWrapping="Wrap" />
+                <Button Width="160"
+                        Classes="accent"
+                        Content="Connect SSH"
+                        Command="{Binding ConnectSelectedDeviceCommand}" />
+              </StackPanel>
+            </Border>
+
+            <TextBox Grid.Row="1"
+                     Margin="0,16,0,0"
+                     Classes="log-console"
+                     AcceptsReturn="True"
+                     IsReadOnly="True"
+                     ScrollViewer.VerticalScrollBarVisibility="Auto"
+                     Text="{Binding ActivityLog}" />
+          </Grid>
+
+          <Grid Margin="18" ColumnDefinitions="300,*">
+            <Border Classes="surface-panel">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="section-title" Text="Support The Project" />
+                <Button Content="PayPal" IsEnabled="False" />
+                <Button Content="Ko-fi" IsEnabled="False" />
+                <Button Content="Buy Me A Coffee" IsEnabled="False" />
+              </StackPanel>
+            </Border>
+
+            <Border Grid.Column="1" Margin="16,0,0,0" Classes="placeholder-panel">
+              <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                <TextBlock Classes="panel-title" Text="Donate Page Preserved" TextAlignment="Center" />
+                <TextBlock Classes="caption"
+                           MaxWidth="560"
+                           Text="The original toolkit includes donation links in this final page. The shell is mirrored here so the Linux host keeps the same overall navigation structure."
+                           TextAlignment="Center"
+                           TextWrapping="Wrap" />
+              </StackPanel>
+            </Border>
+          </Grid>
+        </Carousel>
+      </Grid>
+    </Border>
+  </Grid>
+</Window>

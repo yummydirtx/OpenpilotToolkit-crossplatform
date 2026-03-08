@@ -8,6 +8,8 @@
     <Platform Solution="Debug|ARM64" Project="x64" />
     <Build Solution="*|ARM64" Project="false" />
   </Project>
+  <Project Path="OpenpilotToolkit.Avalonia/OpenpilotToolkit.Avalonia.csproj" />
+  <Project Path="OpenpilotToolkit.Cli/OpenpilotToolkit.Cli.csproj" />
   <Project Path="OpenpilotSdk/OpenpilotSdk.csproj">
     <Platform Solution="*|ARM64" Project="ARM64" />
     <Platform Solution="*|x64" Project="x64" />

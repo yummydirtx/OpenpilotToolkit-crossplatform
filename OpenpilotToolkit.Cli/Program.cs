@@ -148,6 +148,8 @@ internal static class OpenpilotCli
         Console.WriteLine("  2. OPENPILOT_SSH_KEY");
         Console.WriteLine("  3. ~/.ssh/id_ed25519, ~/.ssh/id_rsa, ~/.ssh/id_ecdsa, ~/.ssh/comma");
         Console.WriteLine("  4. OpenpilotToolkit app data / bundled opensshkey");
+        Console.WriteLine("Encrypted key passphrase:");
+        Console.WriteLine("  OPENPILOT_SSH_KEY_PASSPHRASE");
     }
 
     private static int Fail(string message)

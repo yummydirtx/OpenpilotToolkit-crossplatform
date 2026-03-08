@@ -36,9 +36,17 @@ Openpilot Toolkit streamlines common tasks for openpilot device owners. The tool
 - **SSH Wizard:** Easily generate and install SSH keys.
 - **Fork Installer:** Simple installation of different openpilot forks.
 
+### Cross-Platform GUI (Avalonia Preview)
+- **Linux/macOS-Friendly Desktop Host:** Run a native desktop UI on non-Windows machines with .NET 8.
+- **Device Discovery:** Scan the network for reachable and authenticated comma/openpilot devices.
+- **SSH Connect Workflow:** Promote a discovered device into an authenticated SSH session from the desktop UI.
+- **Recent Route Browser:** Review the latest routes and segment counts without using the Windows player.
+- **Device Actions:** Reboot or shut down the selected device.
+- **Fork Installer:** Install a fork from GitHub with live progress updates.
+
 ### Cross-Platform CLI
 - **Linux/macOS-Friendly Host:** Run discovery and core device operations from any machine with .NET 8.
-- **Host SSH Key Reuse:** Uses an existing private key from `--ssh-key`, `OPENPILOT_SSH_KEY`, or standard `~/.ssh/*` paths.
+- **Host SSH Key Reuse:** Uses an existing private key from `--ssh-key`, `OPENPILOT_SSH_KEY`, standard `~/.ssh/*` paths, and `OPENPILOT_SSH_KEY_PASSPHRASE` for encrypted keys.
 - **Device Management:** Discover devices, list routes, reboot, shut down, and install forks without the Windows GUI.
 
 ## Getting Started
@@ -46,7 +54,7 @@ Openpilot Toolkit streamlines common tasks for openpilot device owners. The tool
 ### Prerequisites
 - Windows 10/11 (x64) for the desktop application
 - Android device (APK sideload) for the mobile application
-- .NET 8 SDK for the cross-platform CLI
+- .NET 8 SDK for the cross-platform Avalonia and CLI hosts
 - An existing SSH private key that already works with your comma/openpilot device
 - `ffmpeg` on `PATH` if you plan to use media export features from a non-Windows host
 - Access to an openpilot or comma device on the same network
@@ -55,7 +63,14 @@ Openpilot Toolkit streamlines common tasks for openpilot device owners. The tool
 
 - **Windows:** [Download the latest release](https://github.com/spektor56/OpenpilotToolkit/releases/download/1.9.8/OpenpilotToolkit.zip), extract the archive, and launch `OpenpilotToolkit.exe`.
 - **Android:** [Download the APK](https://github.com/spektor56/OpenpilotToolkit/releases/download/1.9.5/com.spektor56.openpilottoolkitandroid.apk) and sideload it on your device.
-- **Linux/macOS:** Build and run the CLI locally:
+- **Linux/macOS GUI Preview:** Build and run the Avalonia host locally:
+
+```bash
+dotnet build OpenpilotToolkit.Avalonia/OpenpilotToolkit.Avalonia.csproj
+dotnet run --project OpenpilotToolkit.Avalonia
+```
+
+- **Linux/macOS CLI:** Build and run the CLI locally:
 
 ```bash
 dotnet build OpenpilotToolkit.Cli/OpenpilotToolkit.Cli.csproj
@@ -65,8 +80,8 @@ dotnet run --project OpenpilotToolkit.Cli -- discover
 ## Usage
 
 1. Connect your comma device and ensure it is on the same network as the computer or phone running OPTK.
-2. Launch the Windows app, Android app, or the CLI host.
-3. Use the SSH wizard on Windows/Android if needed, or point the CLI at an existing host key with `--ssh-key`.
+2. Launch the Windows app, Android app, the Avalonia desktop host, or the CLI host.
+3. Use the SSH wizard on Windows/Android if needed, or point the Avalonia/CLI host at an existing private key and optional passphrase for encrypted keys.
 4. Explore the drive exporter, fork installer, remote controls, and route tools as needed.
 
 CLI examples:
@@ -78,9 +93,10 @@ dotnet run --project OpenpilotToolkit.Cli -- install-fork --host 192.168.1.10 --
 ```
 
 Current migration status:
-- The Windows desktop GUI is still WinForms-only.
-- The new CLI is the first cross-platform host and is intended to work on Linux now and macOS next.
-- SSH key generation is still platform-specific and can be ported later.
+- The Windows desktop GUI is still the most complete host and remains WinForms-only.
+- A new Avalonia desktop host now runs on Linux and currently covers discovery, route inventory, fork install, and reboot/shutdown actions.
+- The CLI remains available for cross-platform automation and scripting.
+- Media playback/export, terminal, file explorer, and SSH key generation still need additional cross-platform porting work.
 
 Refer to the screenshots below for examples of the available tools.
 
@@ -106,7 +122,12 @@ bash .agent/setup.sh
 bash .agent/quick-build.sh
 ```
 
-For the cross-platform host, the smaller entry point is:
+For the cross-platform hosts, the smaller entry points are:
+
+```bash
+dotnet build OpenpilotToolkit.Avalonia/OpenpilotToolkit.Avalonia.csproj
+dotnet run --project OpenpilotToolkit.Avalonia
+```
 
 ```bash
 dotnet build OpenpilotToolkit.Cli/OpenpilotToolkit.Cli.csproj

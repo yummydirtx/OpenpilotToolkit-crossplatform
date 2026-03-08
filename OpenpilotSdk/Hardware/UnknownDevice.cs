@@ -8,10 +8,11 @@ namespace OpenpilotSdk.Hardware
 
         public override IReadOnlyDictionary<CameraType, Camera> Cameras => _cameras.Value;
 
-        public UnknownDevice(IPAddress hostAddress, string hostName)
+        public UnknownDevice(IPAddress hostAddress, string hostName, int port = 22)
         {
             IpAddress = hostAddress;
             HostName = hostName;
+            Port = port;
         }
     }
 

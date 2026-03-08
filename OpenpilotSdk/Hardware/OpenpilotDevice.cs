@@ -1278,13 +1278,13 @@ namespace OpenpilotSdk.Hardware
                 catch (SshAuthenticationException)
                 {
                     sshClient.Dispose();
-                    return new UnknownDevice(ipAddress, hostName);
+                    return new UnknownDevice(ipAddress, hostName, port);
                 }
 
                 if (!sshClient.IsConnected)
                 {
                     sshClient.Dispose();
-                    return new UnknownDevice(ipAddress, hostName);
+                    return new UnknownDevice(ipAddress, hostName, port);
                 }
 
                 //~26ms
@@ -1310,8 +1310,12 @@ namespace OpenpilotSdk.Hardware
                 }
                 catch (Exception)
                 {
-                    return new UnknownDevice(ipAddress, hostName);
+                    return new UnknownDevice(ipAddress, hostName, port);
                 }
+            }
+            catch (OpenpilotSshKeyException)
+            {
+                throw;
             }
             catch (Exception e)
             {
@@ -1668,17 +1672,34 @@ namespace OpenpilotSdk.Hardware
 
         private static IPrivateKeySource[] CreatePrivateKeys()
         {
+            var privateKeyPath = OpenpilotHost.ResolvePrivateSshKeyPath();
+            var passPhrase = OpenpilotHost.ResolvePrivateSshKeyPassphrase();
+
             try
             {
                 return
                 [
-                    new PrivateKeyFile(OpenpilotHost.ResolvePrivateSshKeyPath())
+                    string.IsNullOrEmpty(passPhrase)
+                        ? new PrivateKeyFile(privateKeyPath)
+                        : new PrivateKeyFile(privateKeyPath, passPhrase)
                 ];
+            }
+            catch (SshPassPhraseNullOrEmptyException exception)
+            {
+                throw new OpenpilotSshKeyException(
+                    OpenpilotSshKeyErrorKind.PassphraseRequired,
+                    "The configured SSH key is encrypted and requires a passphrase. Set OPENPILOT_SSH_KEY_PASSPHRASE or provide the passphrase in the application.",
+                    exception);
             }
             catch (SshException exception)
             {
-                throw new InvalidOperationException(
-                    "Failed to load the configured SSH private key. Encrypted keys are not supported yet.",
+                throw new OpenpilotSshKeyException(
+                    string.IsNullOrEmpty(passPhrase)
+                        ? OpenpilotSshKeyErrorKind.InvalidPrivateKey
+                        : OpenpilotSshKeyErrorKind.InvalidPassphrase,
+                    string.IsNullOrEmpty(passPhrase)
+                        ? "Failed to load the configured SSH private key. If the key is encrypted, provide its passphrase first."
+                        : "Failed to load the configured SSH private key. The configured passphrase may be incorrect.",
                     exception);
             }
         }
