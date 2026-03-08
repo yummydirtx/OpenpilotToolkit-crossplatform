@@ -10,6 +10,7 @@ using OpenpilotSdk.OpenPilot.Fork;
 using OpenpilotSdk.OpenPilot.Logging;
 using OpenpilotSdk.OpenPilot.Media;
 using OpenpilotSdk.OpenPilot.Segment;
+using OpenpilotSdk.Runtime;
 using OpenpilotSdk.Sftp;
 using Renci.SshNet;
 using Renci.SshNet.Common;
@@ -36,7 +37,7 @@ namespace OpenpilotSdk.Hardware
         protected virtual string NotConnectedMessage => "No connection has been made to the openpilot device";
 
         public bool IsAuthenticated { get; protected set; } = false;
-        protected readonly string TempDirectory = Path.Combine(AppContext.BaseDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.Personal), "tmp");
+        protected readonly string TempDirectory = OpenpilotPaths.TempDirectory;
         public virtual int Port { get; set; } = 22;
         public IPAddress IpAddress { get; init; }
         public string HostName { get; init; }
@@ -54,17 +55,6 @@ namespace OpenpilotSdk.Hardware
         public virtual string GitCloneCommand => @"sudo systemctl stop comma || {{ echo ""ERROR: Failed to stop 'comma' service"" >&2; exit 1; }} && cd /data || {{ echo ""ERROR: Directory '/data' not found or inaccessible"" >&2; exit 1; }} && rm -rf openpilot || {{ echo ""ERROR: Failed to remove old openpilot folder"" >&2; exit 1; }} && git clone -b {1} --depth 1 --single-branch --progress --recurse-submodules --shallow-submodules https://github.com/{0}/{2}.git openpilot || {{ echo ""ERROR: Git clone failed. Check URL, branch, or network."" >&2; exit 1; }}";
 
         public abstract IReadOnlyDictionary<CameraType,Camera> Cameras { get; }
-
-        private static readonly string PrivateSshKeyFile = Path.Combine(
-            OperatingSystem.IsWindows()
-                ? AppContext.BaseDirectory
-                : Environment.GetFolderPath(Environment.SpecialFolder.Personal),
-            "opensshkey");
-
-        private static IPrivateKeySource[] _privateKeys =
-        [
-            new PrivateKeyFile(PrivateSshKeyFile)
-        ];
 
         public string WorkingDirectory
         {
@@ -332,7 +322,7 @@ namespace OpenpilotSdk.Hardware
                         {
                             if (Directory.Exists(Path.GetDirectoryName(path)))
                             {
-                                using (var sftpClient = new SftpClient(IpAddress.ToString(), "comma", _privateKeys))
+                                using (var sftpClient = new SftpClient(IpAddress.ToString(), "comma", CreatePrivateKeys()))
                                 {
                                     sftpClient.KeepAliveInterval = TimeSpan.FromSeconds(10);
                                     await _maxConcurrentConnectionLock.WaitAsync().ConfigureAwait(false);
@@ -459,7 +449,7 @@ namespace OpenpilotSdk.Hardware
         {
             await ConnectSftpAsync().ConfigureAwait(false);
 
-            var segmentFolder = Path.Combine(StorageDirectory, route  + "--" + index);
+            var segmentFolder = OpenpilotPaths.CombineUnixPath(StorageDirectory, route + "--" + index);
             var segmentFiles = SftpClient.GetFilesAsync(segmentFolder);
 
             var rawVideoSegments = new Dictionary<CameraType, VideoSegment>();
@@ -502,7 +492,7 @@ namespace OpenpilotSdk.Hardware
         {
             Connect();
 
-            var segmentFolder = Path.Combine(StorageDirectory, routeDate.ToString("yyyy-MM-dd--HH-mm-ss--" + index));
+            var segmentFolder = OpenpilotPaths.CombineUnixPath(StorageDirectory, routeDate.ToString("yyyy-MM-dd--HH-mm-ss--" + index));
             var segmentFiles = SftpClient.GetFiles(segmentFolder);
 
 
@@ -634,8 +624,6 @@ namespace OpenpilotSdk.Hardware
             var track = new GpxTrack(route.ToString(), null, null, "openpilot", ImmutableArray<GpxWebLink>.Empty, null, null, null, ImmutableArray.Create(trackSegment));
             var gpxFile = new GpxFile();
             gpxFile.Tracks.Add(track);
-            File.WriteAllText(@"D:\OpenPilot\testf\test.gpx", gpxFile.BuildString(new GpxWriterSettings()));
-
             return waypointsToExport;
         }
 
@@ -924,11 +912,6 @@ namespace OpenpilotSdk.Hardware
 
         public static async IAsyncEnumerable<OpenpilotDevice> DiscoverAsync()
         {
-            _privateKeys =
-            [
-                new PrivateKeyFile(PrivateSshKeyFile)
-            ];
-            
             var connectionRequests = new List<Task<OpenpilotDevice?>>();
 
             var discoveryTasks = new List<Task<IReadOnlyList<IZeroconfHost>>>();
@@ -1139,7 +1122,8 @@ namespace OpenpilotSdk.Hardware
                 //Return IP scanned devices and discovery devices
                 var timeout = TimeSpan.FromSeconds(10);
                 var cts = new CancellationTokenSource(timeout);
-                await foreach (var connectionRequest in Task.WhenEach(connectionRequests).WithCancellation(cts.Token).ConfigureAwait(false))
+                var pendingRequests = new List<Task<OpenpilotDevice?>>(connectionRequests);
+                while (pendingRequests.Count > 0)
                 {
                     if (!cts.TryReset())
                     {
@@ -1155,6 +1139,12 @@ namespace OpenpilotSdk.Hardware
                             yield return device;
                         }
                     }
+
+                    var connectionRequest = await Task.WhenAny(pendingRequests)
+                        .WaitAsync(cts.Token)
+                        .ConfigureAwait(false);
+
+                    pendingRequests.Remove(connectionRequest);
 
                     var openpilotDevice = await connectionRequest.ConfigureAwait(false);
                     if (openpilotDevice != null)
@@ -1276,7 +1266,7 @@ namespace OpenpilotSdk.Hardware
                 }
                 
                 //~174.320 ms
-                var sshClient = new SshClient(host, port, "comma", _privateKeys)
+                var sshClient = new SshClient(host, port, "comma", CreatePrivateKeys())
                 {
                     KeepAliveInterval = TimeSpan.FromSeconds(10)
                 };
@@ -1524,7 +1514,11 @@ namespace OpenpilotSdk.Hardware
             {
                 if (SftpClient == null || !SftpClient.IsConnected)
                 {
-                    var connectionInfo = new ConnectionInfo(IpAddress.ToString(), Port, "comma", new PrivateKeyAuthenticationMethod("comma", _privateKeys));
+                    var connectionInfo = new ConnectionInfo(
+                        IpAddress.ToString(),
+                        Port,
+                        "comma",
+                        new PrivateKeyAuthenticationMethod("comma", CreatePrivateKeys()));
 
                     SftpClient = new SftpClient(connectionInfo)
                     {
@@ -1564,7 +1558,7 @@ namespace OpenpilotSdk.Hardware
                 {
                     if (SftpClient == null || !SftpClient.IsConnected)
                     {
-                        SftpClient = new SftpClient(host, Port, "comma", _privateKeys)
+                        SftpClient = new SftpClient(host, Port, "comma", CreatePrivateKeys())
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };
@@ -1601,7 +1595,7 @@ namespace OpenpilotSdk.Hardware
                 {
                     if (SshClient == null || !SshClient.IsConnected)
                     {
-                        SshClient = new SshClient(host, Port, "comma", _privateKeys)
+                        SshClient = new SshClient(host, Port, "comma", CreatePrivateKeys())
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };
@@ -1639,7 +1633,7 @@ namespace OpenpilotSdk.Hardware
                 {
                     if (SshClient == null || !SshClient.IsConnected)
                     {
-                        SshClient = new SshClient(host, Port, "comma", _privateKeys)
+                        SshClient = new SshClient(host, Port, "comma", CreatePrivateKeys())
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };
@@ -1648,7 +1642,7 @@ namespace OpenpilotSdk.Hardware
 
                     if (SftpClient == null || !SftpClient.IsConnected)
                     {
-                        SftpClient = new SftpClient(host, Port, "comma", _privateKeys)
+                        SftpClient = new SftpClient(host, Port, "comma", CreatePrivateKeys())
                         {
                             KeepAliveInterval = TimeSpan.FromSeconds(10)
                         };
@@ -1669,6 +1663,23 @@ namespace OpenpilotSdk.Hardware
             finally
             {
                 _connectionLock.Release();
+            }
+        }
+
+        private static IPrivateKeySource[] CreatePrivateKeys()
+        {
+            try
+            {
+                return
+                [
+                    new PrivateKeyFile(OpenpilotHost.ResolvePrivateSshKeyPath())
+                ];
+            }
+            catch (SshException exception)
+            {
+                throw new InvalidOperationException(
+                    "Failed to load the configured SSH private key. Encrypted keys are not supported yet.",
+                    exception);
             }
         }
     }

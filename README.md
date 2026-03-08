@@ -1,6 +1,6 @@
 # Openpilot Toolkit (OPTK)
 
-Openpilot Toolkit is a class library and desktop/mobile toolkit for interacting with openpilot and comma devices.
+Openpilot Toolkit is a class library and set of host apps for interacting with openpilot and comma devices.
 
 ## Table of Contents
 
@@ -36,23 +36,51 @@ Openpilot Toolkit streamlines common tasks for openpilot device owners. The tool
 - **SSH Wizard:** Easily generate and install SSH keys.
 - **Fork Installer:** Simple installation of different openpilot forks.
 
+### Cross-Platform CLI
+- **Linux/macOS-Friendly Host:** Run discovery and core device operations from any machine with .NET 8.
+- **Host SSH Key Reuse:** Uses an existing private key from `--ssh-key`, `OPENPILOT_SSH_KEY`, or standard `~/.ssh/*` paths.
+- **Device Management:** Discover devices, list routes, reboot, shut down, and install forks without the Windows GUI.
+
 ## Getting Started
 
 ### Prerequisites
 - Windows 10/11 (x64) for the desktop application
 - Android device (APK sideload) for the mobile application
+- .NET 8 SDK for the cross-platform CLI
+- An existing SSH private key that already works with your comma/openpilot device
+- `ffmpeg` on `PATH` if you plan to use media export features from a non-Windows host
 - Access to an openpilot or comma device on the same network
 
 ### Installation
 
 - **Windows:** [Download the latest release](https://github.com/spektor56/OpenpilotToolkit/releases/download/1.9.8/OpenpilotToolkit.zip), extract the archive, and launch `OpenpilotToolkit.exe`.
 - **Android:** [Download the APK](https://github.com/spektor56/OpenpilotToolkit/releases/download/1.9.5/com.spektor56.openpilottoolkitandroid.apk) and sideload it on your device.
+- **Linux/macOS:** Build and run the CLI locally:
+
+```bash
+dotnet build OpenpilotToolkit.Cli/OpenpilotToolkit.Cli.csproj
+dotnet run --project OpenpilotToolkit.Cli -- discover
+```
 
 ## Usage
 
 1. Connect your comma device and ensure it is on the same network as the computer or phone running OPTK.
-2. Launch the Windows or Android application.
-3. Use the SSH wizard to configure access, then explore the drive exporter, file explorer, and other modules as needed.
+2. Launch the Windows app, Android app, or the CLI host.
+3. Use the SSH wizard on Windows/Android if needed, or point the CLI at an existing host key with `--ssh-key`.
+4. Explore the drive exporter, fork installer, remote controls, and route tools as needed.
+
+CLI examples:
+
+```bash
+dotnet run --project OpenpilotToolkit.Cli -- discover
+dotnet run --project OpenpilotToolkit.Cli -- routes --host 192.168.1.10 --limit 5
+dotnet run --project OpenpilotToolkit.Cli -- install-fork --host 192.168.1.10 --owner commaai --branch master
+```
+
+Current migration status:
+- The Windows desktop GUI is still WinForms-only.
+- The new CLI is the first cross-platform host and is intended to work on Linux now and macOS next.
+- SSH key generation is still platform-specific and can be ported later.
 
 Refer to the screenshots below for examples of the available tools.
 
@@ -68,7 +96,7 @@ Refer to the screenshots below for examples of the available tools.
 
 ## Development
 
-Developers can clone the repository and use the scripts in the `.agent/` directory to set up dependencies and build the solution:
+Developers can clone the repository and use the scripts in the `.agent/` directory to set up dependencies and build the Windows/Android solution:
 
 ```bash
 git clone https://github.com/spektor56/OpenpilotToolkit.git
@@ -76,6 +104,13 @@ cd OpenpilotToolkit
 git submodule update --init --recursive
 bash .agent/setup.sh
 bash .agent/quick-build.sh
+```
+
+For the cross-platform host, the smaller entry point is:
+
+```bash
+dotnet build OpenpilotToolkit.Cli/OpenpilotToolkit.Cli.csproj
+dotnet run --project OpenpilotToolkit.Cli -- --help
 ```
 
 ## Contributing

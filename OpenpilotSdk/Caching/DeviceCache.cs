@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using OpenpilotSdk.Runtime;
 
 namespace OpenpilotSdk.Caching
 {
@@ -18,12 +19,7 @@ namespace OpenpilotSdk.Caching
 
         static DeviceCache()
         {
-            CacheFile = Path.Combine(
-                OperatingSystem.IsWindows()
-                    ? AppContext.BaseDirectory
-                    : Environment.GetFolderPath(Environment.SpecialFolder.Personal),
-                "discoverdDevices.json"
-            );
+            CacheFile = OpenpilotPaths.DeviceCacheFile;
         }
 
         public static async Task<IReadOnlyList<DeviceInfo>> LoadAsync()

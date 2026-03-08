@@ -11,7 +11,7 @@ namespace OpenpilotSdk.OpenPilot.Media
         private readonly bool _shouldDisposeStreams;
         private readonly Stream[] _streams;
         private readonly long[] _streamStartPositions;
-        private readonly Lock _syncLock = new();
+        private readonly object _syncLock = new();
         private bool _seekToKeyframe;
         private bool _seekToKeyframes;
         private readonly byte[] _keyframeBuffer = new byte[1000000];

@@ -6,6 +6,17 @@ namespace OpenpilotSdk.Sftp
 {
     public static class Extensions
     {
+        public static async Task<List<T>> ToListAsync<T>(this IAsyncEnumerable<T> source, CancellationToken cancellationToken = default)
+        {
+            var items = new List<T>();
+            await foreach (var item in source.WithCancellation(cancellationToken).ConfigureAwait(false))
+            {
+                items.Add(item);
+            }
+
+            return items;
+        }
+
         public static async IAsyncEnumerable<ISftpFile> GetFilesAsync(this SftpClient client, string directory, [EnumeratorCancellation] CancellationToken cancellationToken = default(CancellationToken))
         {
             var directoryListing = (await client.ListDirectoryAsync(directory, cancellationToken).ToListAsync(cancellationToken: cancellationToken).ConfigureAwait(false)).OrderBy(dir => dir.FullName);

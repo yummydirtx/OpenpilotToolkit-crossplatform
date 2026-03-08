@@ -1,7 +1,7 @@
 using CefSharp;
 using CefSharp.WinForms;
-using FFMpegCore;
 using FlyleafLib;
+using OpenpilotSdk.Runtime;
 using OpenpilotToolkit.Controls;
 using OpenpilotToolkit.Properties;
 using Serilog;
@@ -128,7 +128,7 @@ namespace OpenpilotToolkit
             
             Cef.Initialize(settings);
 
-            GlobalFFOptions.Configure(options => options.BinaryFolder = "./");
+            OpenpilotHost.Configure();
             
             var logPath = Path.Combine(AppContext.BaseDirectory, @"logs\log.txt");
 
