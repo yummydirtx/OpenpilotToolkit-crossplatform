@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
+using CameraProgress = OpenpilotSdk.OpenPilot.Camera.Progress;
 using OpenpilotSdk.Exceptions;
 using OpenpilotSdk.Git;
 using OpenpilotSdk.Hardware;
@@ -24,8 +26,10 @@ public sealed class MainWindowViewModel : ViewModelBase
     private bool _isBusy;
     private bool _isNavigationCollapsed;
     private string _manualHost = string.Empty;
+    private string _playbackStatusMessage = "Select a route to prepare a playback file.";
     private string _resolvedSshKeySummary = string.Empty;
     private int _selectedPageIndex;
+    private CameraType _selectedPlaybackCamera = CameraType.Front;
     private RouteViewModel? _selectedRoute;
     private int _selectedRouteLimit = 20;
     private DeviceViewModel? _selectedDevice;
@@ -44,6 +48,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ConnectHostCommand = new AsyncCommand(ConnectHostAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ManualHost));
         ConnectSelectedDeviceCommand = new AsyncCommand(ConnectSelectedDeviceAsync, () => !IsBusy && SelectedDevice is not null);
         LoadRoutesCommand = new AsyncCommand(LoadRoutesAsync, () => !IsBusy && SelectedDevice is not null);
+        PlaySelectedRouteCommand = new AsyncCommand(PlaySelectedRouteAsync, CanPlaySelectedRoute);
         InstallForkCommand = new AsyncCommand(InstallForkAsync, CanInstallFork);
         RebootCommand = new AsyncCommand(() => ExecuteDeviceActionAsync("reboot", device => device.RebootAsync(), "Reboot command sent."), () => !IsBusy && SelectedDevice is not null);
         ShutdownCommand = new AsyncCommand(() => ExecuteDeviceActionAsync("shut down", device => device.ShutdownAsync(), "Shutdown command sent."), () => !IsBusy && SelectedDevice is not null);
@@ -59,6 +64,8 @@ public sealed class MainWindowViewModel : ViewModelBase
 
     public ObservableCollection<RouteViewModel> Routes { get; } = [];
 
+    public ObservableCollection<CameraType> AvailablePlaybackCameras { get; } = [];
+
     public IReadOnlyList<int> RouteLimitOptions { get; }
 
     public AsyncCommand DiscoverDevicesCommand { get; }
@@ -68,6 +75,8 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncCommand ConnectSelectedDeviceCommand { get; }
 
     public AsyncCommand LoadRoutesCommand { get; }
+
+    public AsyncCommand PlaySelectedRouteCommand { get; }
 
     public AsyncCommand InstallForkCommand { get; }
 
@@ -98,7 +107,13 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string ExportFolder
     {
         get => _exportFolder;
-        set => SetProperty(ref _exportFolder, value?.Trim() ?? string.Empty);
+        set
+        {
+            if (SetProperty(ref _exportFolder, value?.Trim() ?? string.Empty))
+            {
+                UpdatePlaybackStatusSummary();
+            }
+        }
     }
 
     public string SshKeyPath
@@ -245,6 +260,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         {
             if (SetProperty(ref _selectedRoute, value))
             {
+                UpdateAvailablePlaybackCameras();
                 NotifySelectedRouteStateChanged();
             }
         }
@@ -305,6 +321,32 @@ public sealed class MainWindowViewModel : ViewModelBase
     public string SelectedRouteDateLine => SelectedRoute?.DateLine ?? "-";
 
     public string SelectedRouteSegmentLine => SelectedRoute?.SegmentLine ?? "-";
+
+    public CameraType SelectedPlaybackCamera
+    {
+        get => _selectedPlaybackCamera;
+        set
+        {
+            if (SetProperty(ref _selectedPlaybackCamera, value))
+            {
+                OnPropertyChanged(nameof(SelectedPlaybackCameraLabel));
+                UpdatePlaybackStatusSummary();
+                RefreshCommandStates();
+            }
+        }
+    }
+
+    public bool HasPlaybackCameras => AvailablePlaybackCameras.Count > 0;
+
+    public string SelectedPlaybackCameraLabel => HasPlaybackCameras
+        ? GetCameraLabel(SelectedPlaybackCamera)
+        : "No camera selected";
+
+    public string PlaybackStatusMessage
+    {
+        get => _playbackStatusMessage;
+        private set => SetProperty(ref _playbackStatusMessage, value);
+    }
 
     public void SetSshKeyPath(string path)
     {
@@ -472,6 +514,59 @@ public sealed class MainWindowViewModel : ViewModelBase
         });
     }
 
+    private async Task PlaySelectedRouteAsync()
+    {
+        if (SelectedDevice is null || SelectedRoute is null || !HasPlaybackCameras)
+        {
+            return;
+        }
+
+        var route = SelectedRoute.Model;
+        var cameraType = SelectedPlaybackCamera;
+        var cameraLabel = GetCameraLabel(cameraType);
+        var playbackFilePath = GetPlaybackFilePath(route, cameraType);
+
+        await RunBusyOperationAsync($"Preparing {cameraLabel.ToLowerInvariant()} playback...", async () =>
+        {
+            Directory.CreateDirectory(GetPlaybackCacheDirectory());
+
+            if (!IsUsablePlaybackFile(playbackFilePath))
+            {
+                Log($"Exporting {route} ({cameraLabel}) to {playbackFilePath} for playback.");
+                PlaybackStatusMessage = $"Exporting the {cameraLabel.ToLowerInvariant()} camera to MP4...";
+
+                var progress = new Progress<CameraProgress>(item =>
+                {
+                    StatusMessage = $"{item.Percent}% preparing {cameraLabel.ToLowerInvariant()} playback";
+                    PlaybackStatusMessage = $"{item.Percent}% prepared for {cameraLabel.ToLowerInvariant()} playback.";
+                });
+
+                await SelectedDevice.Model.ExportRouteAsync(
+                    GetPlaybackCacheDirectory(),
+                    route,
+                    new Camera(cameraType),
+                    combineSegments: true,
+                    progress).ConfigureAwait(true);
+            }
+            else
+            {
+                Log($"Using cached playback file {playbackFilePath}.");
+            }
+
+            if (!IsUsablePlaybackFile(playbackFilePath))
+            {
+                throw new FileNotFoundException(
+                    "Playback export completed without producing a usable MP4 file.",
+                    playbackFilePath);
+            }
+
+            StartPlaybackFile(playbackFilePath);
+            StatusMessage = "Playback launched";
+            PlaybackStatusMessage = $"{cameraLabel} playback opened in the system video player.";
+            Log($"Opened playback file {playbackFilePath}.");
+        });
+    }
+
     private async Task ExecuteDeviceActionAsync(
         string actionName,
         Func<OpenpilotDevice, Task<bool>> action,
@@ -568,6 +663,14 @@ public sealed class MainWindowViewModel : ViewModelBase
                && !string.IsNullOrWhiteSpace(ForkBranch);
     }
 
+    private bool CanPlaySelectedRoute()
+    {
+        return !IsBusy
+               && SelectedDevice is not null
+               && SelectedRoute is not null
+               && HasPlaybackCameras;
+    }
+
     private void ToggleNavigation()
     {
         IsNavigationCollapsed = !IsNavigationCollapsed;
@@ -626,6 +729,7 @@ public sealed class MainWindowViewModel : ViewModelBase
         ConnectHostCommand.RaiseCanExecuteChanged();
         ConnectSelectedDeviceCommand.RaiseCanExecuteChanged();
         LoadRoutesCommand.RaiseCanExecuteChanged();
+        PlaySelectedRouteCommand.RaiseCanExecuteChanged();
         InstallForkCommand.RaiseCanExecuteChanged();
         RebootCommand.RaiseCanExecuteChanged();
         ShutdownCommand.RaiseCanExecuteChanged();
@@ -651,6 +755,171 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(SelectedRouteSummary));
         OnPropertyChanged(nameof(SelectedRouteDateLine));
         OnPropertyChanged(nameof(SelectedRouteSegmentLine));
+    }
+
+    private void UpdateAvailablePlaybackCameras()
+    {
+        CameraType[] cameras = SelectedRoute?.Model.Segments
+            .SelectMany(segment => segment.RawVideoSegments.Keys)
+            .Distinct()
+            .OrderBy(GetCameraSortKey)
+            .ToArray() ?? [];
+
+        AvailablePlaybackCameras.Clear();
+        foreach (var camera in cameras)
+        {
+            AvailablePlaybackCameras.Add(camera);
+        }
+
+        if (cameras.Length > 0 && !cameras.Contains(SelectedPlaybackCamera))
+        {
+            _selectedPlaybackCamera = cameras[0];
+            OnPropertyChanged(nameof(SelectedPlaybackCamera));
+        }
+
+        OnPropertyChanged(nameof(HasPlaybackCameras));
+        OnPropertyChanged(nameof(SelectedPlaybackCameraLabel));
+        UpdatePlaybackStatusSummary();
+        RefreshCommandStates();
+    }
+
+    private void UpdatePlaybackStatusSummary()
+    {
+        if (SelectedRoute is null)
+        {
+            PlaybackStatusMessage = "Select a route to prepare a playback file.";
+            return;
+        }
+
+        if (!HasPlaybackCameras)
+        {
+            PlaybackStatusMessage = "No raw camera footage is available on the selected route.";
+            return;
+        }
+
+        var cameraLabel = GetCameraLabel(SelectedPlaybackCamera).ToLowerInvariant();
+        var playbackFilePath = GetPlaybackFilePath(SelectedRoute.Model, SelectedPlaybackCamera);
+        PlaybackStatusMessage = IsUsablePlaybackFile(playbackFilePath)
+            ? $"Cached {cameraLabel} playback is ready to open in your system video player."
+            : $"The selected {cameraLabel} camera will be exported to MP4 before playback starts.";
+    }
+
+    private string GetPlaybackCacheDirectory()
+    {
+        var rootDirectory = string.IsNullOrWhiteSpace(ExportFolder)
+            ? OpenpilotPaths.TempDirectory
+            : Path.GetFullPath(ExportFolder);
+
+        return Path.Combine(rootDirectory, "PlaybackCache");
+    }
+
+    private string GetPlaybackFilePath(OpenpilotSdk.OpenPilot.Route route, CameraType cameraType)
+    {
+        return Path.Combine(GetPlaybackCacheDirectory(), $"{route}{(char)cameraType}.mp4");
+    }
+
+    private static bool IsUsablePlaybackFile(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return false;
+        }
+
+        return new FileInfo(path).Length > 0;
+    }
+
+    private static void StartPlaybackFile(string filePath)
+    {
+        if (TryOpenWithShell(filePath))
+        {
+            return;
+        }
+
+        if (OperatingSystem.IsLinux() && TryStartProcess("xdg-open", filePath))
+        {
+            return;
+        }
+
+        if (OperatingSystem.IsMacOS() && TryStartProcess("open", filePath))
+        {
+            return;
+        }
+
+        if (TryStartProcess("ffplay", filePath))
+        {
+            return;
+        }
+
+        if (TryStartProcess("mpv", filePath))
+        {
+            return;
+        }
+
+        if (TryStartProcess("vlc", filePath))
+        {
+            return;
+        }
+
+        throw new InvalidOperationException(
+            "No video player could be launched for the exported playback file. Install a default media handler, ffplay, mpv, or VLC.");
+    }
+
+    private static bool TryOpenWithShell(string filePath)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(filePath)
+            {
+                UseShellExecute = true
+            });
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TryStartProcess(string command, string argument)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo(command)
+            {
+                UseShellExecute = false
+            };
+            startInfo.ArgumentList.Add(argument);
+
+            Process.Start(startInfo);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string GetCameraLabel(CameraType cameraType)
+    {
+        return cameraType switch
+        {
+            CameraType.Front => "Front",
+            CameraType.Wide => "Wide",
+            CameraType.Driver => "Driver",
+            _ => cameraType.ToString()
+        };
+    }
+
+    private static int GetCameraSortKey(CameraType cameraType)
+    {
+        return cameraType switch
+        {
+            CameraType.Front => 0,
+            CameraType.Wide => 1,
+            CameraType.Driver => 2,
+            _ => int.MaxValue
+        };
     }
 
     private (DeviceViewModel DeviceViewModel, bool IsNewDevice) UpsertDevice(OpenpilotDevice device)

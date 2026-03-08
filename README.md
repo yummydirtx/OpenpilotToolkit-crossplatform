@@ -41,6 +41,7 @@ Openpilot Toolkit streamlines common tasks for openpilot device owners. The tool
 - **Device Discovery:** Scan the network for reachable and authenticated comma/openpilot devices.
 - **SSH Connect Workflow:** Promote a discovered device into an authenticated SSH session from the desktop UI.
 - **Recent Route Browser:** Review the latest routes and segment counts without using the Windows player.
+- **Route File Playback:** Export the selected route/camera to a local MP4 and open it in the host video player.
 - **Device Actions:** Reboot or shut down the selected device.
 - **Fork Installer:** Install a fork from GitHub with live progress updates.
 
@@ -94,9 +95,9 @@ dotnet run --project OpenpilotToolkit.Cli -- install-fork --host 192.168.1.10 --
 
 Current migration status:
 - The Windows desktop GUI is still the most complete host and remains WinForms-only.
-- A new Avalonia desktop host now runs on Linux and currently covers discovery, route inventory, fork install, and reboot/shutdown actions.
+- A new Avalonia desktop host now runs on Linux and currently covers discovery, route inventory, route file playback, fork install, and reboot/shutdown actions.
 - The CLI remains available for cross-platform automation and scripting.
-- Media playback/export, terminal, file explorer, and SSH key generation still need additional cross-platform porting work.
+- Route export, terminal, file explorer, and SSH key generation still need additional cross-platform porting work.
 
 Refer to the screenshots below for examples of the available tools.
 

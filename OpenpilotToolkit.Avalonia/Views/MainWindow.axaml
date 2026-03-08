@@ -314,13 +314,14 @@
                     <TextBlock Classes="section-title" Text="Tasks" />
                     <Button Classes="accent" Content="Refresh Route List" Command="{Binding LoadRoutesCommand}" />
                     <Button Content="Connect SSH" Command="{Binding ConnectSelectedDeviceCommand}" />
+                    <Button Content="Play Selected Route" Command="{Binding PlaySelectedRouteCommand}" />
                     <Button Content="Export Selected Route(s)" IsEnabled="False" />
                     <Button Content="GPX Export" IsEnabled="False" />
                     <Button Content="Mapillary Export" IsEnabled="False" />
                     <Button Content="Delete Routes" IsEnabled="False" />
                     <TextBlock Classes="caption"
                                Margin="0,8,0,0"
-                               Text="Native playback and file export are still being ported to the Linux host."
+                               Text="Playback exports the selected route to a local MP4 cache and opens it in your system video player."
                                TextWrapping="Wrap" />
                   </StackPanel>
                 </Border>
@@ -357,14 +358,15 @@
                   <Grid ColumnDefinitions="*,280">
                     <Border Classes="surface-panel">
                       <StackPanel Spacing="12">
-                        <TextBlock Classes="section-title" Text="Export Camera" />
-                        <StackPanel Orientation="Horizontal" Spacing="18">
-                          <CheckBox Content="Front" IsChecked="True" />
-                          <CheckBox Content="Wide" />
-                          <CheckBox Content="Driver" />
-                        </StackPanel>
+                        <TextBlock Classes="section-title" Text="Playback Camera" />
+                        <ComboBox ItemsSource="{Binding AvailablePlaybackCameras}"
+                                  SelectedItem="{Binding SelectedPlaybackCamera}"
+                                  IsEnabled="{Binding HasPlaybackCameras}" />
+                        <Button Classes="accent"
+                                Content="Play Selected Route"
+                                Command="{Binding PlaySelectedRouteCommand}" />
                         <TextBlock Classes="caption"
-                                   Text="Camera selection is shown here to preserve the original export layout."
+                                   Text="Choose which camera stream should be exported to MP4 before playback starts."
                                    TextWrapping="Wrap" />
                       </StackPanel>
                     </Border>
@@ -372,7 +374,7 @@
                     <Border Grid.Column="1" Margin="16,0,0,0" Classes="surface-panel">
                       <StackPanel Spacing="12">
                         <TextBlock Classes="section-title" Text="Route Info" />
-                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                        <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
                           <TextBlock Classes="form-label" Text="Route" />
                           <TextBlock Grid.Column="1" Text="{Binding SelectedRouteTitle}" />
 
@@ -384,22 +386,35 @@
 
                           <TextBlock Grid.Row="3" Classes="form-label" Text="Device" />
                           <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding ActiveDeviceDisplay}" />
+
+                          <TextBlock Grid.Row="4" Classes="form-label" Text="Camera" />
+                          <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedPlaybackCameraLabel}" />
                         </Grid>
                       </StackPanel>
                     </Border>
                   </Grid>
 
                   <Border Grid.Row="1" Margin="0,16,0,0" Classes="placeholder-panel">
-                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
                       <TextBlock Classes="panel-title" Text="{Binding SelectedRouteTitle}" TextAlignment="Center" />
                       <TextBlock Classes="caption"
                                  MaxWidth="520"
                                  Text="{Binding SelectedRouteSummary}"
                                  TextAlignment="Center"
                                  TextWrapping="Wrap" />
+                      <Button Classes="accent"
+                              MinWidth="220"
+                              HorizontalAlignment="Center"
+                              Content="Play Selected Route"
+                              Command="{Binding PlaySelectedRouteCommand}" />
+                      <TextBlock Classes="caption"
+                                 MaxWidth="560"
+                                 Text="{Binding PlaybackStatusMessage}"
+                                 TextAlignment="Center"
+                                 TextWrapping="Wrap" />
                       <TextBlock Classes="placeholder-note"
                                  MaxWidth="560"
-                                 Text="The Windows host shows a Flyleaf video player here. This Linux host keeps the export workflow layout, but media playback still needs a cross-platform replacement." />
+                                 Text="The Linux host now stages a local MP4 file for the selected route and opens it with your system video player. Export actions are still being ported." />
                     </StackPanel>
                   </Border>
                 </Grid>

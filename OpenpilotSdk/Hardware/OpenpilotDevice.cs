@@ -18,6 +18,7 @@ using Renci.SshNet.Sftp;
 using Serilog;
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.Net;
@@ -238,44 +239,35 @@ namespace OpenpilotSdk.Hardware
             if (combineSegments)
             {
                 var exportTasks =
-                    route.Segments.Select((segment) => ExportSegmentAsync(exportPath, segment, camera, false, segmentProgress)).ToArray();
+                    route.Segments.Select((segment) => ExportSegmentAsync(exportPath, segment, camera, true, segmentProgress)).ToArray();
 
-                if (exportTasks.Length > 0)
+                var exportedSegments = (await Task.WhenAll(exportTasks).ConfigureAwait(false))
+                    .Where(file => !string.IsNullOrWhiteSpace(file))
+                    .Select(file => Path.Combine(exportPath, file))
+                    .Where(IsUsableLocalFile)
+                    .ToArray();
+
+                if (exportedSegments.Length > 0)
                 {
-                    var outputFilePath = Path.Combine(exportPath, route.ToString() + (char)camera.Type) + ".hevc";
-                    bool fileWritten = false;
+                    var outputFilePath = Path.Combine(exportPath, route.ToString() + (char)camera.Type) + ".mp4";
 
-                    FileStream outputFile;
-                    await using ((outputFile = File.Create(outputFilePath)).ConfigureAwait(false))
+                    if (exportedSegments.Length == 1)
                     {
-                        for (int i = 0; i < exportTasks.Length; i++)
+                        if (!Path.GetFullPath(exportedSegments[0]).Equals(Path.GetFullPath(outputFilePath), StringComparison.OrdinalIgnoreCase))
                         {
-                            var fileName = await exportTasks[i].ConfigureAwait(false);
-                            
-                            if (!string.IsNullOrWhiteSpace(fileName))
-                            {
-                                var tempFilePath = Path.Combine(exportPath, fileName);
-
-                                FileStream inputFile;
-                                await using ((inputFile = File.OpenRead(tempFilePath)).ConfigureAwait(false))
-                                {
-                                    await inputFile.CopyToAsync(outputFile).ConfigureAwait(false);
-                                }
-                                File.Delete(tempFilePath);
-                            }
+                            File.Copy(exportedSegments[0], outputFilePath, true);
+                            File.Delete(exportedSegments[0]);
                         }
-
-                        fileWritten = outputFile.Length > 0;
                     }
-
-                    if (fileWritten)
+                    else
                     {
-                        await FFMpegArguments.FromFileInput(outputFilePath, true,
-                                                    options => options.WithFramerate(camera.FrameRate))
-                                                .OutputToFile(Path.Combine(exportPath, route.ToString() + (char)camera.Type) + ".mp4", true, options => options.CopyChannel())
-                                                .ProcessAsynchronously().ConfigureAwait(false);
+                        await ConcatenateMediaSegmentsAsync(exportedSegments, outputFilePath).ConfigureAwait(false);
+
+                        foreach (var exportedSegment in exportedSegments)
+                        {
+                            File.Delete(exportedSegment);
+                        }
                     }
-                    File.Delete(outputFilePath);
                 }
             }
             else
@@ -285,7 +277,10 @@ namespace OpenpilotSdk.Hardware
                 var exportTasks =
                     route.Segments.Select((segment) => ExportSegmentAsync(exportPath, segment, camera, true, segmentProgress)).ToArray();
 
-                var exportedSegments = (await Task.WhenAll(exportTasks).ConfigureAwait(false)).Where(file => !string.IsNullOrWhiteSpace(file)).ToArray();
+                var exportedSegments = (await Task.WhenAll(exportTasks).ConfigureAwait(false))
+                    .Where(file => !string.IsNullOrWhiteSpace(file))
+                    .Where(file => IsUsableLocalFile(Path.Combine(exportPath, file)))
+                    .ToArray();
 
                 if (exportedSegments.Length > 1)
                 {
@@ -313,67 +308,36 @@ namespace OpenpilotSdk.Hardware
                 fileName = fileNameWithoutExtension + (containerize ? ".mp4" : Path.GetExtension(videoPath));
                 var outputFilePath = Path.Combine(path, fileNameWithoutExtension + Path.GetExtension(videoPath));
                 var convertedFilePath = Path.Combine(path, fileName);
-                if (!File.Exists(convertedFilePath))
+                if (!IsUsableLocalFile(convertedFilePath))
                 {
-                    if (!File.Exists(outputFilePath))
+                    if (!IsUsableLocalFile(outputFilePath))
                     {
-                        FileStream outputFile;
-                        await using ((outputFile = File.Create(outputFilePath)).ConfigureAwait(false))
-                        {
-                            if (Directory.Exists(Path.GetDirectoryName(path)))
-                            {
-                                using (var sftpClient = new SftpClient(IpAddress.ToString(), "comma", CreatePrivateKeys()))
-                                {
-                                    sftpClient.KeepAliveInterval = TimeSpan.FromSeconds(10);
-                                    await _maxConcurrentConnectionLock.WaitAsync().ConfigureAwait(false);
-                                    try
-                                    {
-                                        await sftpClient.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
-                                    }
-                                    finally
-                                    {
-                                        _maxConcurrentConnectionLock.Release();
-                                    }
-
-                                    SftpFileStream stream;
-                                    await using ((stream = await sftpClient.OpenAsync(videoPath, FileMode.Open,
-                                                     FileAccess.Read, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false))
-                                    {
-                                        var buffer = new byte[81920];
-                                        int bytesRead;
-                                        var sourceLength = stream.Length;
-                                        int totalBytesRead = 0;
-                                        int previousProgress = 0;
-
-                                        while ((bytesRead = await stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
-                                        {
-                                            await outputFile.WriteAsync(buffer.AsMemory(0, bytesRead)).ConfigureAwait(false);
-
-                                            if (progress != null)
-                                            {
-                                                totalBytesRead += bytesRead;
-
-                                                segmentProgress.Percent = (int)(((double)totalBytesRead / (double)sourceLength) * 100);
-                                                if (segmentProgress.Percent > previousProgress)
-                                                {
-                                                    previousProgress = segmentProgress.Percent;
-                                                    progress.Report(segmentProgress);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        await DownloadSegmentFileAsync(videoPath, outputFilePath, progress, segmentProgress)
+                            .ConfigureAwait(false);
                     }
 
                     if (containerize)
                     {
-                        await FFMpegArguments.FromFileInput(outputFilePath, true,
-                                options => options.WithFramerate(video.Camera.FrameRate))
-                            .OutputToFile(Path.Combine(path, fileName), true, options => options.CopyChannel())
-                            .ProcessAsynchronously().ConfigureAwait(false);
-                        File.Delete(outputFilePath);
+                        var quickVideoPath = await DownloadQuickCameraSegmentAsync(path, routeSegment, fileNameWithoutExtension)
+                            .ConfigureAwait(false);
+
+                        try
+                        {
+                            await ContainerizeSegmentAsync(outputFilePath, convertedFilePath, quickVideoPath, video.Camera.FrameRate)
+                                .ConfigureAwait(false);
+                        }
+                        finally
+                        {
+                            if (File.Exists(outputFilePath))
+                            {
+                                File.Delete(outputFilePath);
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(quickVideoPath) && File.Exists(quickVideoPath))
+                            {
+                                File.Delete(quickVideoPath);
+                            }
+                        }
                     }
                 }
             }
@@ -385,6 +349,212 @@ namespace OpenpilotSdk.Hardware
             }
 
             return fileName;
+        }
+
+        private async Task DownloadSegmentFileAsync(string remotePath, string localPath, IProgress<Progress>? progress = null,
+            Progress? segmentProgress = null)
+        {
+            if (IsUsableLocalFile(localPath))
+            {
+                return;
+            }
+
+            if (File.Exists(localPath))
+            {
+                File.Delete(localPath);
+            }
+
+            var directory = Path.GetDirectoryName(localPath);
+            if (!string.IsNullOrWhiteSpace(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            FileStream outputFile;
+            await using ((outputFile = File.Create(localPath)).ConfigureAwait(false))
+            {
+                using var sftpClient = new SftpClient(IpAddress.ToString(), "comma", CreatePrivateKeys())
+                {
+                    KeepAliveInterval = TimeSpan.FromSeconds(10)
+                };
+
+                await _maxConcurrentConnectionLock.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    await sftpClient.ConnectAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _maxConcurrentConnectionLock.Release();
+                }
+
+                SftpFileStream stream;
+                await using ((stream = await sftpClient.OpenAsync(remotePath, FileMode.Open,
+                                 FileAccess.Read, CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false))
+                {
+                    var buffer = new byte[81920];
+                    int bytesRead;
+                    var sourceLength = stream.Length;
+                    int totalBytesRead = 0;
+                    int previousProgress = 0;
+
+                    while ((bytesRead = await stream.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+                    {
+                        await outputFile.WriteAsync(buffer.AsMemory(0, bytesRead)).ConfigureAwait(false);
+
+                        if (progress != null && segmentProgress != null)
+                        {
+                            totalBytesRead += bytesRead;
+
+                            segmentProgress.Percent = (int)(((double)totalBytesRead / (double)sourceLength) * 100);
+                            if (segmentProgress.Percent > previousProgress)
+                            {
+                                previousProgress = segmentProgress.Percent;
+                                progress.Report(segmentProgress);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private async Task<string?> DownloadQuickCameraSegmentAsync(string exportPath, RouteSegment routeSegment, string fileNameWithoutExtension)
+        {
+            if (!routeSegment.VideoSegments.TryGetValue(CameraType.Front, out var quickCameraSegment))
+            {
+                return null;
+            }
+
+            var quickCameraPath = quickCameraSegment.File.FullName;
+            if (string.IsNullOrWhiteSpace(quickCameraPath))
+            {
+                return null;
+            }
+
+            var localQuickCameraPath = Path.Combine(exportPath, fileNameWithoutExtension + ".audio.ts");
+            await DownloadSegmentFileAsync(quickCameraPath, localQuickCameraPath).ConfigureAwait(false);
+            return localQuickCameraPath;
+        }
+
+        private static async Task ContainerizeSegmentAsync(string rawVideoPath, string outputFilePath, string? quickVideoPath, int frameRate)
+        {
+            if (!string.IsNullOrWhiteSpace(quickVideoPath) && File.Exists(quickVideoPath))
+            {
+                try
+                {
+                    await RunFfmpegAsync([
+                        "-y",
+                        "-framerate", frameRate.ToString(CultureInfo.InvariantCulture),
+                        "-i", rawVideoPath,
+                        "-i", quickVideoPath,
+                        "-map", "0:v:0",
+                        "-map", "1:a:0?",
+                        "-c:v", "copy",
+                        "-c:a", "aac",
+                        outputFilePath
+                    ]).ConfigureAwait(false);
+
+                    return;
+                }
+                catch (Exception exception)
+                {
+                    Log.Warning(exception, "Failed to mux audio from {QuickVideoPath} into {OutputFilePath}. Falling back to video-only export.", quickVideoPath, outputFilePath);
+
+                    if (File.Exists(outputFilePath))
+                    {
+                        File.Delete(outputFilePath);
+                    }
+                }
+            }
+
+            await FFMpegArguments.FromFileInput(rawVideoPath, true,
+                    options => options.WithFramerate(frameRate))
+                .OutputToFile(outputFilePath, true, options => options.CopyChannel())
+                .ProcessAsynchronously().ConfigureAwait(false);
+        }
+
+        private static async Task ConcatenateMediaSegmentsAsync(IEnumerable<string> segmentFilePaths, string outputFilePath)
+        {
+            var segments = segmentFilePaths.ToArray();
+            if (segments.Length == 0)
+            {
+                return;
+            }
+
+            var concatListPath = Path.Combine(
+                Path.GetDirectoryName(outputFilePath) ?? AppContext.BaseDirectory,
+                Path.GetFileNameWithoutExtension(outputFilePath) + ".concat.txt");
+
+            await File.WriteAllLinesAsync(
+                concatListPath,
+                segments.Select(segment => $"file '{EscapeConcatPath(segment)}'")).ConfigureAwait(false);
+
+            try
+            {
+                await RunFfmpegAsync([
+                    "-y",
+                    "-f", "concat",
+                    "-safe", "0",
+                    "-i", concatListPath,
+                    "-c", "copy",
+                    outputFilePath
+                ]).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (File.Exists(concatListPath))
+                {
+                    File.Delete(concatListPath);
+                }
+            }
+        }
+
+        private static async Task RunFfmpegAsync(IEnumerable<string> arguments)
+        {
+            var executablePath = ResolveFfmpegPath();
+            var startInfo = new ProcessStartInfo(executablePath)
+            {
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+
+            foreach (var argument in arguments)
+            {
+                startInfo.ArgumentList.Add(argument);
+            }
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException($"Failed to start ffmpeg from '{executablePath}'.");
+
+            string standardOutput = await process.StandardOutput.ReadToEndAsync().ConfigureAwait(false);
+            string standardError = await process.StandardError.ReadToEndAsync().ConfigureAwait(false);
+
+            await process.WaitForExitAsync().ConfigureAwait(false);
+
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"ffmpeg exited with code {process.ExitCode}.{Environment.NewLine}{standardError}{Environment.NewLine}{standardOutput}".Trim());
+            }
+        }
+
+        private static string ResolveFfmpegPath()
+        {
+            var bundledName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+            var bundledPath = OpenpilotPaths.GetBundledAssetPath(bundledName);
+            return File.Exists(bundledPath) ? bundledPath : bundledName;
+        }
+
+        private static bool IsUsableLocalFile(string path)
+        {
+            return File.Exists(path) && new FileInfo(path).Length > 0;
+        }
+
+        private static string EscapeConcatPath(string path)
+        {
+            return path.Replace("'", "'\\''");
         }
 
         public async Task<Bitmap?> GetThumbnailAsync(RouteSegment routeSegment)
