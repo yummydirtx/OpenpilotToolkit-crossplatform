@@ -200,9 +200,9 @@ namespace OpenpilotSdk.Hardware
                 .WhenAll(route.Segments.Select(v => OpenReadAsync(v.RawVideoSegments[camera.Type].File.FullName)).ToArray()).ConfigureAwait(false));
         }
 
-        public async Task<CombinedStreamCollection> GetVideoStreams(Route route)
+        public Task<CombinedStreamCollection> GetVideoStreams(Route route)
         {
-            return new CombinedStreamCollection(this, route,true);
+            return Task.FromResult(new CombinedStreamCollection(this, route, true));
         }
 
         public async Task ExportRouteAsync(string exportPath, Route route, Camera camera, bool combineSegments = false, IProgress<OpenPilot.Camera.Progress>? progress = null)
@@ -216,7 +216,7 @@ namespace OpenpilotSdk.Hardware
                 segmentProgress = new Progress<Progress>();
                 var segmentProgressDictionary = route.Segments.ToDictionary(segment => segment.Index, _ => 0);
                 int previousProgress = 0;
-                segmentProgress.ProgressChanged += async (sender, segmentProgressResult) =>
+                segmentProgress.ProgressChanged += (sender, segmentProgressResult) =>
                 {
                     segmentProgressDictionary[segmentProgressResult.Segment] = segmentProgressResult.Percent;
 
@@ -290,7 +290,18 @@ namespace OpenpilotSdk.Hardware
             }
         }
 
-        public async Task<string> ExportSegmentAsync(string path, RouteSegment routeSegment, Camera camera, bool containerize,
+        public Task<string> ExportSegmentAsync(string path, RouteSegment routeSegment, Camera camera, bool containerize,
+            IProgress<Progress>? progress = null)
+        {
+            return ExportSegmentAsync(
+                path,
+                routeSegment,
+                camera,
+                containerize ? VideoExportContainer.Mp4 : VideoExportContainer.None,
+                progress);
+        }
+
+        public async Task<string> ExportSegmentAsync(string path, RouteSegment routeSegment, Camera camera, VideoExportContainer container,
             IProgress<Progress>? progress = null)
         {
             var segmentProgress = new Progress(routeSegment.Index);
@@ -303,9 +314,18 @@ namespace OpenpilotSdk.Hardware
             var videoPath = video?.File?.FullName;
             if (!string.IsNullOrWhiteSpace(videoPath))
             {
-                var fileNameWithoutExtension = new DirectoryInfo(Path.GetDirectoryName(videoPath)).Name + (char)camera.Type;
-                
-                fileName = fileNameWithoutExtension + (containerize ? ".mp4" : Path.GetExtension(videoPath));
+                var videoSegment = video ?? throw new InvalidOperationException("The selected route segment does not contain the requested camera stream.");
+                var videoDirectoryPath = Path.GetDirectoryName(videoPath)
+                    ?? throw new InvalidOperationException("The selected route segment does not have a valid source directory.");
+                var fileNameWithoutExtension = new DirectoryInfo(videoDirectoryPath).Name + (char)camera.Type;
+                var outputExtension = container switch
+                {
+                    VideoExportContainer.Mp4 => ".mp4",
+                    VideoExportContainer.MpegTs => ".ts",
+                    _ => Path.GetExtension(videoPath)
+                };
+
+                fileName = fileNameWithoutExtension + outputExtension;
                 var outputFilePath = Path.Combine(path, fileNameWithoutExtension + Path.GetExtension(videoPath));
                 var convertedFilePath = Path.Combine(path, fileName);
                 if (!IsUsableLocalFile(convertedFilePath))
@@ -316,14 +336,19 @@ namespace OpenpilotSdk.Hardware
                             .ConfigureAwait(false);
                     }
 
-                    if (containerize)
+                    if (container != VideoExportContainer.None)
                     {
                         var quickVideoPath = await DownloadQuickCameraSegmentAsync(path, routeSegment, fileNameWithoutExtension)
                             .ConfigureAwait(false);
 
                         try
-                        {
-                            await ContainerizeSegmentAsync(outputFilePath, convertedFilePath, quickVideoPath, video.Camera.FrameRate)
+                        { 
+                            await ContainerizeSegmentAsync(
+                                    outputFilePath,
+                                    convertedFilePath,
+                                    quickVideoPath,
+                                    videoSegment.Camera.FrameRate,
+                                    container)
                                 .ConfigureAwait(false);
                         }
                         finally
@@ -436,23 +461,26 @@ namespace OpenpilotSdk.Hardware
             return localQuickCameraPath;
         }
 
-        private static async Task ContainerizeSegmentAsync(string rawVideoPath, string outputFilePath, string? quickVideoPath, int frameRate)
+        private static async Task ContainerizeSegmentAsync(
+            string rawVideoPath,
+            string outputFilePath,
+            string? quickVideoPath,
+            int frameRate,
+            VideoExportContainer container)
         {
+            ArgumentOutOfRangeException.ThrowIfLessThan((int)container, (int)VideoExportContainer.None);
+
             if (!string.IsNullOrWhiteSpace(quickVideoPath) && File.Exists(quickVideoPath))
             {
                 try
                 {
-                    await RunFfmpegAsync([
-                        "-y",
-                        "-framerate", frameRate.ToString(CultureInfo.InvariantCulture),
-                        "-i", rawVideoPath,
-                        "-i", quickVideoPath,
-                        "-map", "0:v:0",
-                        "-map", "1:a:0?",
-                        "-c:v", "copy",
-                        "-c:a", "aac",
-                        outputFilePath
-                    ]).ConfigureAwait(false);
+                    await RunFfmpegAsync(BuildContainerizationArguments(
+                            rawVideoPath,
+                            outputFilePath,
+                            quickVideoPath,
+                            frameRate,
+                            container))
+                        .ConfigureAwait(false);
 
                     return;
                 }
@@ -467,10 +495,86 @@ namespace OpenpilotSdk.Hardware
                 }
             }
 
-            await FFMpegArguments.FromFileInput(rawVideoPath, true,
-                    options => options.WithFramerate(frameRate))
-                .OutputToFile(outputFilePath, true, options => options.CopyChannel())
-                .ProcessAsynchronously().ConfigureAwait(false);
+            switch (container)
+            {
+                case VideoExportContainer.Mp4:
+                    await FFMpegArguments.FromFileInput(rawVideoPath, true,
+                            options => options.WithFramerate(frameRate))
+                        .OutputToFile(outputFilePath, true, options => options.CopyChannel())
+                        .ProcessAsynchronously().ConfigureAwait(false);
+                    break;
+                case VideoExportContainer.MpegTs:
+                    await RunFfmpegAsync(BuildContainerizationArguments(
+                            rawVideoPath,
+                            outputFilePath,
+                            null,
+                            frameRate,
+                            container))
+                        .ConfigureAwait(false);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported container format '{container}'.");
+            }
+        }
+
+        private static string[] BuildContainerizationArguments(
+            string rawVideoPath,
+            string outputFilePath,
+            string? quickVideoPath,
+            int frameRate,
+            VideoExportContainer container)
+        {
+            var arguments = new List<string>
+            {
+                "-y",
+                "-fflags", "+genpts",
+                "-framerate", frameRate.ToString(CultureInfo.InvariantCulture),
+                "-i", rawVideoPath
+            };
+
+            if (!string.IsNullOrWhiteSpace(quickVideoPath))
+            {
+                arguments.AddRange([
+                    "-i", quickVideoPath,
+                    "-map", "0:v:0",
+                    "-map", "1:a:0?"
+                ]);
+            }
+            else
+            {
+                arguments.AddRange([
+                    "-map", "0:v:0"
+                ]);
+            }
+
+            arguments.AddRange([
+                "-c:v", "copy"
+            ]);
+
+            if (!string.IsNullOrWhiteSpace(quickVideoPath))
+            {
+                arguments.AddRange([
+                    "-c:a", "aac"
+                ]);
+            }
+
+            switch (container)
+            {
+                case VideoExportContainer.Mp4:
+                    arguments.Add(outputFilePath);
+                    break;
+                case VideoExportContainer.MpegTs:
+                    arguments.AddRange([
+                        "-muxdelay", "0",
+                        "-f", "mpegts",
+                        outputFilePath
+                    ]);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported container format '{container}'.");
+            }
+
+            return arguments.ToArray();
         }
 
         private static async Task ConcatenateMediaSegmentsAsync(IEnumerable<string> segmentFilePaths, string outputFilePath)

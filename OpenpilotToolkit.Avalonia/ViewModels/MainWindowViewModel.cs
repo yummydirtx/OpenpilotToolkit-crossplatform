@@ -3,12 +3,15 @@ using System.Collections.Specialized;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using Avalonia.Threading;
+using LibVLCSharp.Shared;
 using CameraProgress = OpenpilotSdk.OpenPilot.Camera.Progress;
 using OpenpilotSdk.Exceptions;
 using OpenpilotSdk.Git;
 using OpenpilotSdk.Hardware;
 using OpenpilotSdk.OpenPilot.Fork;
 using OpenpilotSdk.Runtime;
+using OpenpilotToolkit.Avalonia.Services;
 
 namespace OpenpilotToolkit.Avalonia.ViewModels;
 
@@ -24,7 +27,14 @@ public sealed class MainWindowViewModel : ViewModelBase
     private string _forkOwner = string.Empty;
     private string _forkRepository = "openpilot";
     private bool _isBusy;
+    private bool _isLivePlaybackMuted;
+    private bool _isLivePlaybackRunning;
     private bool _isNavigationCollapsed;
+    private CancellationTokenSource? _livePlaybackCancellation;
+    private MediaPlayer? _livePlaybackMediaPlayer;
+    private Task? _livePlaybackPrefetchTask;
+    private VlcLivePlaybackSession? _livePlaybackSession;
+    private string _livePlaybackStatusMessage = "Select a route to start live playback.";
     private string _manualHost = string.Empty;
     private string _playbackStatusMessage = "Select a route to prepare a playback file.";
     private string _resolvedSshKeySummary = string.Empty;
@@ -48,6 +58,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         ConnectHostCommand = new AsyncCommand(ConnectHostAsync, () => !IsBusy && !string.IsNullOrWhiteSpace(ManualHost));
         ConnectSelectedDeviceCommand = new AsyncCommand(ConnectSelectedDeviceAsync, () => !IsBusy && SelectedDevice is not null);
         LoadRoutesCommand = new AsyncCommand(LoadRoutesAsync, () => !IsBusy && SelectedDevice is not null);
+        StartLivePlaybackCommand = new AsyncCommand(StartLivePlaybackAsync, CanStartLivePlayback);
+        StopLivePlaybackCommand = new AsyncCommand(StopLivePlaybackAsync, CanStopLivePlayback);
+        ToggleLivePlaybackMuteCommand = new AsyncCommand(ToggleLivePlaybackMuteAsync, CanToggleLivePlaybackMute);
         PlaySelectedRouteCommand = new AsyncCommand(PlaySelectedRouteAsync, CanPlaySelectedRoute);
         InstallForkCommand = new AsyncCommand(InstallForkAsync, CanInstallFork);
         RebootCommand = new AsyncCommand(() => ExecuteDeviceActionAsync("reboot", device => device.RebootAsync(), "Reboot command sent."), () => !IsBusy && SelectedDevice is not null);
@@ -75,6 +88,12 @@ public sealed class MainWindowViewModel : ViewModelBase
     public AsyncCommand ConnectSelectedDeviceCommand { get; }
 
     public AsyncCommand LoadRoutesCommand { get; }
+
+    public AsyncCommand StartLivePlaybackCommand { get; }
+
+    public AsyncCommand StopLivePlaybackCommand { get; }
+
+    public AsyncCommand ToggleLivePlaybackMuteCommand { get; }
 
     public AsyncCommand PlaySelectedRouteCommand { get; }
 
@@ -247,6 +266,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 Routes.Clear();
                 SelectedRoute = null;
+                _ = StopLivePlaybackCoreAsync(resetStatus: false);
                 NotifySelectedDeviceStateChanged();
                 RefreshCommandStates();
             }
@@ -331,6 +351,7 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 OnPropertyChanged(nameof(SelectedPlaybackCameraLabel));
                 UpdatePlaybackStatusSummary();
+                UpdateLivePlaybackStatusSummary();
                 RefreshCommandStates();
             }
         }
@@ -346,6 +367,56 @@ public sealed class MainWindowViewModel : ViewModelBase
     {
         get => _playbackStatusMessage;
         private set => SetProperty(ref _playbackStatusMessage, value);
+    }
+
+    public MediaPlayer? LivePlaybackMediaPlayer
+    {
+        get => _livePlaybackMediaPlayer;
+        private set
+        {
+            if (SetProperty(ref _livePlaybackMediaPlayer, value))
+            {
+                OnPropertyChanged(nameof(HasLivePlaybackMediaPlayer));
+                OnPropertyChanged(nameof(ShowLivePlaybackPlaceholder));
+            }
+        }
+    }
+
+    public bool HasLivePlaybackMediaPlayer => LivePlaybackMediaPlayer is not null;
+
+    public bool ShowLivePlaybackPlaceholder => !HasLivePlaybackMediaPlayer;
+
+    public bool IsLivePlaybackRunning
+    {
+        get => _isLivePlaybackRunning;
+        private set
+        {
+            if (SetProperty(ref _isLivePlaybackRunning, value))
+            {
+                OnPropertyChanged(nameof(LiveMuteButtonLabel));
+                RefreshCommandStates();
+            }
+        }
+    }
+
+    public bool IsLivePlaybackMuted
+    {
+        get => _isLivePlaybackMuted;
+        private set
+        {
+            if (SetProperty(ref _isLivePlaybackMuted, value))
+            {
+                OnPropertyChanged(nameof(LiveMuteButtonLabel));
+            }
+        }
+    }
+
+    public string LiveMuteButtonLabel => IsLivePlaybackMuted ? "Unmute Audio" : "Mute Audio";
+
+    public string LivePlaybackStatusMessage
+    {
+        get => _livePlaybackStatusMessage;
+        private set => SetProperty(ref _livePlaybackStatusMessage, value);
     }
 
     public void SetSshKeyPath(string path)
@@ -514,6 +585,122 @@ public sealed class MainWindowViewModel : ViewModelBase
         });
     }
 
+    private async Task StartLivePlaybackAsync()
+    {
+        if (SelectedDevice is null || SelectedRoute is null || !HasPlaybackCameras)
+        {
+            return;
+        }
+
+        await StopLivePlaybackCoreAsync(resetStatus: false).ConfigureAwait(true);
+
+        var device = SelectedDevice.Model;
+        var route = SelectedRoute.Model;
+        var cameraType = SelectedPlaybackCamera;
+        var cameraLabel = GetCameraLabel(cameraType);
+        var routeSegments = route.Segments
+            .Where(segment => segment.RawVideoSegments.ContainsKey(cameraType))
+            .OrderBy(segment => segment.Index)
+            .ToArray();
+
+        if (routeSegments.Length == 0)
+        {
+            LivePlaybackStatusMessage = $"No {cameraLabel.ToLowerInvariant()} segments are available for live playback.";
+            return;
+        }
+
+        var liveCacheDirectory = GetLivePlaybackCacheDirectory(route, cameraType);
+        var cancellation = new CancellationTokenSource();
+        _livePlaybackCancellation = cancellation;
+        VlcLivePlaybackSession? livePlaybackSession = null;
+
+        await RunBusyOperationAsync($"Preparing {cameraLabel.ToLowerInvariant()} live playback...", async () =>
+        {
+            Directory.CreateDirectory(liveCacheDirectory);
+            LivePlaybackStatusMessage = $"Exporting segment 1 of {routeSegments.Length} for live playback...";
+
+            var firstFileName = await device.ExportSegmentAsync(
+                liveCacheDirectory,
+                routeSegments[0],
+                new Camera(cameraType),
+                VideoExportContainer.MpegTs).ConfigureAwait(true);
+
+            cancellation.Token.ThrowIfCancellationRequested();
+
+            var firstFilePath = Path.Combine(liveCacheDirectory, firstFileName);
+            if (!IsUsablePlaybackFile(firstFilePath))
+            {
+                throw new FileNotFoundException(
+                    "Live playback could not prepare the first route segment.",
+                    firstFilePath);
+            }
+
+            livePlaybackSession = VlcLivePlaybackSession.Start(firstFilePath, IsLivePlaybackMuted);
+
+            if (_livePlaybackCancellation != cancellation)
+            {
+                await livePlaybackSession.DisposeAsync().ConfigureAwait(true);
+                return;
+            }
+
+            livePlaybackSession.PlaybackEnded += OnLivePlaybackEnded;
+            livePlaybackSession.PlaybackFailed += OnLivePlaybackFailed;
+            _livePlaybackSession = livePlaybackSession;
+            LivePlaybackMediaPlayer = livePlaybackSession.MediaPlayer;
+            IsLivePlaybackRunning = true;
+            StatusMessage = "Live playback started";
+            LivePlaybackStatusMessage = $"{cameraLabel} live playback started in the embedded player with segment 1 of {routeSegments.Length}.";
+            Log($"Started live playback for {route} ({cameraLabel}).");
+
+            _livePlaybackPrefetchTask = ContinueLivePlaybackAsync(
+                device,
+                route,
+                cameraType,
+                routeSegments.Skip(1).ToArray(),
+                liveCacheDirectory,
+                livePlaybackSession,
+                cameraLabel,
+                routeSegments.Length,
+                cancellation.Token);
+        }).ConfigureAwait(true);
+
+        if (_livePlaybackCancellation == cancellation && !IsLivePlaybackRunning)
+        {
+            _livePlaybackCancellation = null;
+            cancellation.Cancel();
+            cancellation.Dispose();
+
+            if (livePlaybackSession is not null)
+            {
+                await livePlaybackSession.DisposeAsync().ConfigureAwait(true);
+            }
+
+            UpdateLivePlaybackStatusSummary();
+        }
+    }
+
+    private async Task StopLivePlaybackAsync()
+    {
+        await StopLivePlaybackCoreAsync(resetStatus: true).ConfigureAwait(true);
+    }
+
+    private Task ToggleLivePlaybackMuteAsync()
+    {
+        var nextMutedState = !IsLivePlaybackMuted;
+        IsLivePlaybackMuted = nextMutedState;
+
+        if (_livePlaybackSession is not null)
+        {
+            _livePlaybackSession.SetMute(nextMutedState);
+        }
+
+        LivePlaybackStatusMessage = nextMutedState
+            ? "Live playback audio is muted."
+            : "Live playback audio is enabled.";
+
+        return Task.CompletedTask;
+    }
+
     private async Task PlaySelectedRouteAsync()
     {
         if (SelectedDevice is null || SelectedRoute is null || !HasPlaybackCameras)
@@ -663,6 +850,24 @@ public sealed class MainWindowViewModel : ViewModelBase
                && !string.IsNullOrWhiteSpace(ForkBranch);
     }
 
+    private bool CanStartLivePlayback()
+    {
+        return !IsBusy
+               && SelectedDevice is not null
+               && SelectedRoute is not null
+               && HasPlaybackCameras;
+    }
+
+    private bool CanStopLivePlayback()
+    {
+        return _livePlaybackSession is not null || _livePlaybackCancellation is not null;
+    }
+
+    private bool CanToggleLivePlaybackMute()
+    {
+        return _livePlaybackSession is not null && IsLivePlaybackRunning;
+    }
+
     private bool CanPlaySelectedRoute()
     {
         return !IsBusy
@@ -729,6 +934,9 @@ public sealed class MainWindowViewModel : ViewModelBase
         ConnectHostCommand.RaiseCanExecuteChanged();
         ConnectSelectedDeviceCommand.RaiseCanExecuteChanged();
         LoadRoutesCommand.RaiseCanExecuteChanged();
+        StartLivePlaybackCommand.RaiseCanExecuteChanged();
+        StopLivePlaybackCommand.RaiseCanExecuteChanged();
+        ToggleLivePlaybackMuteCommand.RaiseCanExecuteChanged();
         PlaySelectedRouteCommand.RaiseCanExecuteChanged();
         InstallForkCommand.RaiseCanExecuteChanged();
         RebootCommand.RaiseCanExecuteChanged();
@@ -780,7 +988,31 @@ public sealed class MainWindowViewModel : ViewModelBase
         OnPropertyChanged(nameof(HasPlaybackCameras));
         OnPropertyChanged(nameof(SelectedPlaybackCameraLabel));
         UpdatePlaybackStatusSummary();
+        UpdateLivePlaybackStatusSummary();
         RefreshCommandStates();
+    }
+
+    private void UpdateLivePlaybackStatusSummary()
+    {
+        if (IsLivePlaybackRunning)
+        {
+            return;
+        }
+
+        if (SelectedRoute is null)
+        {
+            LivePlaybackStatusMessage = "Select a route to start live playback.";
+            return;
+        }
+
+        if (!HasPlaybackCameras)
+        {
+            LivePlaybackStatusMessage = "No raw camera footage is available for live playback on the selected route.";
+            return;
+        }
+
+        var cameraLabel = GetCameraLabel(SelectedPlaybackCamera).ToLowerInvariant();
+        LivePlaybackStatusMessage = $"Start live playback to stream the {cameraLabel} camera into the embedded player as each segment finishes exporting.";
     }
 
     private void UpdatePlaybackStatusSummary()
@@ -804,6 +1036,147 @@ public sealed class MainWindowViewModel : ViewModelBase
             : $"The selected {cameraLabel} camera will be exported to MP4 before playback starts.";
     }
 
+    private async Task StopLivePlaybackCoreAsync(bool resetStatus)
+    {
+        var cancellation = _livePlaybackCancellation;
+        _livePlaybackCancellation = null;
+
+        var livePlaybackSession = _livePlaybackSession;
+        _livePlaybackSession = null;
+        LivePlaybackMediaPlayer = null;
+
+        cancellation?.Cancel();
+        if (livePlaybackSession is not null)
+        {
+            livePlaybackSession.PlaybackEnded -= OnLivePlaybackEnded;
+            livePlaybackSession.PlaybackFailed -= OnLivePlaybackFailed;
+            await livePlaybackSession.DisposeAsync().ConfigureAwait(true);
+        }
+
+        cancellation?.Dispose();
+        _livePlaybackPrefetchTask = null;
+        IsLivePlaybackRunning = false;
+
+        if (resetStatus)
+        {
+            StatusMessage = "Live playback stopped";
+            LivePlaybackStatusMessage = "Live playback stopped.";
+            Log("Stopped live playback.");
+        }
+        else
+        {
+            UpdateLivePlaybackStatusSummary();
+        }
+    }
+
+    private async Task ContinueLivePlaybackAsync(
+        OpenpilotDevice device,
+        OpenpilotSdk.OpenPilot.Route route,
+        CameraType cameraType,
+        IReadOnlyList<OpenpilotSdk.OpenPilot.RouteSegment> remainingSegments,
+        string liveCacheDirectory,
+        VlcLivePlaybackSession livePlaybackSession,
+        string cameraLabel,
+        int totalSegments,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var camera = new Camera(cameraType);
+            for (var segmentIndex = 0; segmentIndex < remainingSegments.Count; segmentIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var routeSegment = remainingSegments[segmentIndex];
+                LivePlaybackStatusMessage =
+                    $"Buffering segment {segmentIndex + 2} of {totalSegments} for {cameraLabel.ToLowerInvariant()} live playback...";
+
+                var fileName = await device.ExportSegmentAsync(
+                    liveCacheDirectory,
+                    routeSegment,
+                    camera,
+                    VideoExportContainer.MpegTs).ConfigureAwait(true);
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var filePath = Path.Combine(liveCacheDirectory, fileName);
+                if (!IsUsablePlaybackFile(filePath))
+                {
+                    throw new FileNotFoundException(
+                        $"Live playback did not produce a usable file for segment {routeSegment.Index}.",
+                        filePath);
+                }
+
+                livePlaybackSession.AppendSegment(filePath);
+                LivePlaybackStatusMessage =
+                    $"Buffered segment {segmentIndex + 2} of {totalSegments} for {cameraLabel.ToLowerInvariant()} live playback.";
+            }
+
+            if (_livePlaybackCancellation?.Token == cancellationToken)
+            {
+                livePlaybackSession.Complete();
+                LivePlaybackStatusMessage =
+                    $"{cameraLabel} live playback buffered all {totalSegments} segments for {route}.";
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // A stopped/restarted session cancels the export loop.
+        }
+        catch (Exception exception)
+        {
+            if (_livePlaybackCancellation?.Token != cancellationToken)
+            {
+                return;
+            }
+
+            livePlaybackSession.Complete();
+            StatusMessage = "Live playback buffering failed";
+            LivePlaybackStatusMessage = "Live playback failed while buffering the remaining route segments.";
+            Log($"{exception.GetType().Name}: {exception.Message}");
+        }
+    }
+
+    private void OnLivePlaybackEnded()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_livePlaybackSession is null)
+            {
+                return;
+            }
+
+            _livePlaybackCancellation?.Dispose();
+            _livePlaybackCancellation = null;
+            _livePlaybackPrefetchTask = null;
+            IsLivePlaybackRunning = false;
+            StatusMessage = "Live playback finished";
+            LivePlaybackStatusMessage = "Live playback reached the end of the buffered route.";
+            Log("Live playback reached the end of the buffered route.");
+            RefreshCommandStates();
+        });
+    }
+
+    private void OnLivePlaybackFailed()
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (_livePlaybackSession is null)
+            {
+                return;
+            }
+
+            _livePlaybackCancellation?.Dispose();
+            _livePlaybackCancellation = null;
+            _livePlaybackPrefetchTask = null;
+            IsLivePlaybackRunning = false;
+            StatusMessage = "Live playback failed";
+            LivePlaybackStatusMessage = "Embedded live playback hit a decoding or renderer error.";
+            Log("Embedded live playback failed.");
+            RefreshCommandStates();
+        });
+    }
+
     private string GetPlaybackCacheDirectory()
     {
         var rootDirectory = string.IsNullOrWhiteSpace(ExportFolder)
@@ -811,6 +1184,11 @@ public sealed class MainWindowViewModel : ViewModelBase
             : Path.GetFullPath(ExportFolder);
 
         return Path.Combine(rootDirectory, "PlaybackCache");
+    }
+
+    private string GetLivePlaybackCacheDirectory(OpenpilotSdk.OpenPilot.Route route, CameraType cameraType)
+    {
+        return Path.Combine(GetPlaybackCacheDirectory(), "Live", $"{route}{(char)cameraType}");
     }
 
     private string GetPlaybackFilePath(OpenpilotSdk.OpenPilot.Route route, CameraType cameraType)

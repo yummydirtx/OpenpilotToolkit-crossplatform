@@ -41,6 +41,7 @@ Openpilot Toolkit streamlines common tasks for openpilot device owners. The tool
 - **Device Discovery:** Scan the network for reachable and authenticated comma/openpilot devices.
 - **SSH Connect Workflow:** Promote a discovered device into an authenticated SSH session from the desktop UI.
 - **Recent Route Browser:** Review the latest routes and segment counts without using the Windows player.
+- **Embedded Live Playback:** Stream audio-aware route segments into an in-window renderer with mute control on Linux/macOS.
 - **Route File Playback:** Export the selected route/camera to a local MP4 and open it in the host video player.
 - **Device Actions:** Reboot or shut down the selected device.
 - **Fork Installer:** Install a fork from GitHub with live progress updates.
@@ -58,6 +59,7 @@ Openpilot Toolkit streamlines common tasks for openpilot device owners. The tool
 - .NET 8 SDK for the cross-platform Avalonia and CLI hosts
 - An existing SSH private key that already works with your comma/openpilot device
 - `ffmpeg` on `PATH` if you plan to use media export features from a non-Windows host
+- `libvlc` installed on Linux/macOS if you plan to use the embedded Avalonia live player
 - Access to an openpilot or comma device on the same network
 
 ### Installation
@@ -95,7 +97,7 @@ dotnet run --project OpenpilotToolkit.Cli -- install-fork --host 192.168.1.10 --
 
 Current migration status:
 - The Windows desktop GUI is still the most complete host and remains WinForms-only.
-- A new Avalonia desktop host now runs on Linux and currently covers discovery, route inventory, route file playback, fork install, and reboot/shutdown actions.
+- A new Avalonia desktop host now runs on Linux and currently covers discovery, route inventory, embedded live playback, route file playback, fork install, and reboot/shutdown actions.
 - The CLI remains available for cross-platform automation and scripting.
 - Route export, terminal, file explorer, and SSH key generation still need additional cross-platform porting work.
 
